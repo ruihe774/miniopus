@@ -51,7 +51,9 @@ function run(mod: WebAssembly.Module, ch: number, br: number, cx: number): { ms:
 
 const REPS = Number(Deno.env.get('REPS') ?? 15);
 console.log(`${frames} frames (${(frames * 0.02).toFixed(1)} s) per run, ${REPS} interleaved runs, min / median ms`);
-for (const [ch, br, cx] of [[1, 24000, 10], [1, 64000, 10], [2, 64000, 10], [2, 128000, 10], [1, 64000, 5]]) {
+// Stereo at 6, 16 and 24 kbps run the downmix-to-mono and stereo-width (`stereo_fade`) paths, which the
+// higher bitrates never reach.
+for (const [ch, br, cx] of [[1, 24000, 10], [1, 64000, 10], [2, 64000, 10], [2, 128000, 10], [1, 64000, 5], [2, 6000, 10], [2, 16000, 10], [2, 24000, 10]]) {
   const ms: number[][] = impls.map(() => []);
   const bytes: number[] = impls.map(() => 0);
   for (let r = -1; r < REPS; r++) {

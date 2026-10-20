@@ -185,8 +185,9 @@ static inv_table: [u8; 128] = [
 /// celt_encode_with_ec with `len = N+overlap`). `*tf_chan` is only written when a channel's
 /// metric exceeds 0 (the caller initializes it); `*tf_estimate` is always written. Returns
 /// `is_transient`.
-// IX-MIXED: the `tmp` loops are EASY (re-slice to `len2`); `inv_table.at(id)` is HARD (`id` is
-// computed from the signal energy ratio, no length to prove it against).
+// IX-HARD: `inv_table.at(id)`: `id` is computed from the signal energy ratio, no length to prove it
+// against. The `tmp` loops over `len2` (per-sample, a re-slice to `len2` would do) are left on `Ix` too:
+// converting them risks a check in a per-sample loop and was not tried.
 pub fn transient_analysis(
     in_: &[f32],
     len: i32,
@@ -375,7 +376,7 @@ pub fn compute_mdcts(shortBlocks: i32, in_: &[f32], out: &mut [f32], C: i32, CC:
 /// starting at channel `c`); `inp[0..N]` receives the pre-emphasized signal
 /// (`in+c*(N+overlap)+overlap` of the caller); `*mem` is `preemph_memE[c]`. The coefficient is
 /// `mode->preemph[0]` (`preemph[1] == 0`; `upsample` is always 1, `clip` is always set).
-// IX-MIXED: per-sample loops over `inp[..N]` / `pcmp[CC * i]`. Converted (`inp[..N]` re-slice + `step_by(CC)`
+// IX-HARD: per-sample loops over `inp[..N]` / `pcmp[CC * i]`. Converted (`inp[..N]` re-slice + `step_by(CC)`
 // zip): +0.8% encode time (the strided iterator loses the scalar loop's codegen), -51 bytes; reverted.
 pub fn celt_preemphasis(pcmp: &[f32], inp: &mut [f32], N: i32, CC: i32, mem: &mut f32, need_clip: bool) {
     let coef0 = modes::preemph0;
@@ -422,8 +423,9 @@ pub fn l1_metric(tmp: &[f32], N: i32, lm: i32, bias: f32) -> f32 {
 
 /// `X` holds the channels of normalized spectrum (`N0` coefficients each); `tf_res[0..len]` and
 /// `importance[0..len]` are indexed by band. Returns `tf_select`.
-// IX-MIXED: `metric`/`importance`/`path0`/`path1`/`tf_res` loops over `lenu` are EASY (re-slice to
-// `lenu`); `X.rg(off..)` (offset from the band edges) and `tf_select_table.at(4 * isTransient + k)` are HARD.
+// IX-HARD: `X.rg(off..)` (offset from the band edges) and `tf_select_table.at(4 * isTransient + k)` (index
+// computed from coded values). The band-level `metric`/`importance`/`path0`/`path1`/`tf_res` loops over
+// `lenu` (a re-slice to `lenu` would do) are left on `Ix` too; not measured.
 pub fn tf_analysis(
     len: i32,
     isTransient: i32,
@@ -565,8 +567,8 @@ pub fn tf_analysis(
 
 /// Codes the tf_res flags of bands `start..end` and `tf_select`, then converts `tf_res[start..end]`
 /// to the final per-band tf change via `tf_select_table`.
-// IX-MIXED: `tf_res` over `start..end` is EASY; `tf_select_table.at(4 * isTransient + 2 * tf_select + tf_res)`
-// is HARD (index computed from coded values).
+// IX-HARD: `tf_select_table.at(4 * isTransient + 2 * tf_select + tf_res)`: index computed from coded values.
+// The band-level `tf_res` loop over `start..end` is left on `Ix` too; not measured.
 pub fn tf_encode(start: i32, end: i32, isTransient: i32, tf_res: &mut [i32], mut tf_select: i32, enc: &mut ec_enc) {
     let mut budget: u32 = enc.storage * 8;
     let mut tell: u32 = ec_tell(enc) as u32;
@@ -603,7 +605,8 @@ pub fn tf_encode(start: i32, end: i32, isTransient: i32, tf_res: &mut [i32], mut
 
 /// `X` holds the two channels of normalized spectrum (`N0` coefficients each) when `C == 2`.
 /// `bandLogE` is `C*nbEBands`. `analysis` and `surround_trim` are dropped (see section header).
-// IX-MIXED: `bandLogE` loop is EASY; `X.rg(a..)`/`X.rg(n0 + a..)` (band edge `<< LM`) are HARD.
+// IX-HARD: `X.rg(a..)`/`X.rg(n0 + a..)`: offsets from the band edges `<< LM`, no length to prove them
+// against. The band-level `bandLogE` loop is left on `Ix` too; not measured.
 pub fn alloc_trim_analysis(
     X: &[f32],
     bandLogE: &[f32],
@@ -672,8 +675,8 @@ pub fn alloc_trim_analysis(
 }
 
 /// Returns `dual_stereo` (0/1). `X` holds the two channels of normalized spectrum (`N0` each).
-// IX-MIXED: `eb.at(i)` for `i < 14` is EASY (constant bound); `X.at(j)`/`X.at(N0 + j)` with `j` from
-// the band edges is HARD.
+// IX-HARD: `X.at(j)`/`X.at(N0 + j)` with `j` from the band edges, in a per-sample loop. The `eb.at(i)` reads
+// for `i < 14` (constant bound on the band table) are left on `Ix` too; not measured.
 pub fn stereo_analysis(X: &[f32], N0: i32) -> i32 {
     let mut sumLR: f32 = EPSILON;
     let mut sumMS: f32 = EPSILON;
@@ -1097,8 +1100,9 @@ pub fn tone_detect(in_: &[f32], CC: i32, N: i32, toneishness: &mut f32) -> f32 {
 /// signal. The C `prefilter_mem` argument is `st->in_mem + CC*overlap`, which is
 /// `st.prefilter_mem` here (updated in place). Returns `pf_on`.
 /// Dropped parameters: `analysis`, `qext_scale`; `st->arch`.
-// IX-MIXED: `before`/`after`/`thresh` are constant indices into 2-element arrays (EASY); the `rg` ranges
-// at `c * mp`, `c * ps`, `c * stride + ...` (channel offsets into runtime-sized buffers) are HARD.
+// IX-HARD: the `rg` ranges at `c * mp`, `c * ps`, `c * stride + ...`: channel offsets into runtime-sized
+// buffers. The constant indices into the 2-element `before`/`after`/`thresh` arrays are left on `Ix` too;
+// not measured.
 pub fn run_prefilter(
     st: &mut CELTEncoder,
     in_: &mut [f32],
@@ -1421,9 +1425,9 @@ pub fn compute_vbr(
 /// the CBR branches are removed), no analysis, no QEXT, no RESYNTH, no LFE, no energy mask
 /// (surround), no `signalling`, `start == 0` (so `hybrid == 0` and the hybrid-only code is
 /// removed). `pitch_change` is not computed (it only feeds the analysis terms of compute_vbr).
-// IX-MIXED: the band loops (`bandLogE`, `oldBandE`, `energyError`, `offsets`, `cap`) are EASY (re-slice to
-// `nb` / `C * nb`); the `buf.rg_mut(..CC * (N + overlap))` and `prefilter_mem.rg(.. mp - ovu ..)` ranges
-// (from the frame size and channel count) are HARD.
+// IX-HARD: the `buf.rg_mut(..CC * (N + overlap))` and `prefilter_mem.rg(.. mp - ovu ..)` ranges (from the
+// frame size and channel count). The band-level loops (`bandLogE`, `oldBandE`, `energyError`, `offsets`,
+// `cap`; a re-slice to `nb` / `C * nb` would do) are left on `Ix` too; not measured.
 pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_enc) -> i32 {
     let mut bits: i32;
     let mut shortBlocks: i32;

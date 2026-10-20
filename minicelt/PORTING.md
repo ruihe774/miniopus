@@ -101,10 +101,19 @@ bit-exact comparison below. What was removed or specialized:
   `celt_cos_norm` is the part of libm's `cos` that its angles reach, and `acos64` libm's `acos`
   with the hardware `sqrt` (both bit for bit equal to `libm`'s, checked exhaustively over the
   inputs they can see). Only `log` and `exp` are still `libm`'s.
-- Bounds checks: indexing goes through `arch::Ix` (`x.at(i)`, `*x.at_mut(i) = v`,
-  `x.rg(a..b)`), unchecked like C in release and checked in the `checked` profile (debug
-  assertions), which keeps panic sites (code and source locations) out of the release build. New code
-  should use it, and run the `checked` tests.
+- Bounds checks: where the compiler can be given a proof (constant indices into fixed arrays, masks,
+  `match` on a bounded value, iterators, `chunks_exact`, a re-slice hoisted out of the loop) the code uses
+  plain indexing, which is checked in every profile and adds no check in a per-sample loop. Where it
+  cannot (indices read out of tables or computed from coded values, caller-sized slices at offsets from the
+  band table, strided per-sample loops whose iterator form measured slower) indexing goes through
+  `arch::Ix` (`x.at(i)`, `*x.at_mut(i) = v`, `x.rg(a..b)`), unchecked like C in release and checked in the
+  `checked` profile (debug assertions). Every function that still uses `Ix` has an `IX-HARD` comment
+  giving the reason and, where a conversion was tried, its measured cost (bytes, encode time). The rule
+  for a conversion: no bounds check added inside a per-sample loop (a check hoisted out of the loop, or in
+  a band-level loop that runs once per frame, is fine), size is a soft constraint, and the encode time
+  measured with `minicelt/test/bench.ts` must stay within noise (about 0.2 %). `haar1`,
+  `celt_preemphasis`, `pitch_search` and `icwrs` were converted and reverted on that measure. New code
+  should follow the same split, and run the `checked` tests.
 - Memory: the pseudostack is 16 KiB and the shadow stack 8 KiB (the module stays one page up to about
   10 KiB), so the whole module is one 64 KiB wasm page. What keeps the pseudostack small: `norm` of
   `quant_all_bands` only exists when the theta RDO resynthesises (without it the folding source
@@ -127,6 +136,14 @@ the new one and require identical packets, final ranges and `in_dtx` (the tolera
 does not see small changes). Mono/stereo, complexity 0..10, bitrates from 500 to 750000, constrained VBR
 on/off, packet loss, bandwidths, DTX, i16/f32, dynamic ctl changes and the speech corpus were used,
 both variants.
+
+Speed regressions: `minicelt/test/bench.ts` (Deno; usage in its header) encodes the concatenated
+speech corpus with two builds, interleaved, and prints min/median time and output size per
+configuration. Differences below about 0.2 % are noise. Run it for any change that touches a hot loop
+(it covers mono at 24 and 64 kbps and stereo at 6 to 128 kbps, complexity 5 and 10, i.e. every function
+changed in the Ix conversion; an instrumented unoptimized build (`wasm-opt --log-execution`) over these
+and 9 more configurations entered all of them, but `stereo_fade` only at 24 kbps and below. It does not
+cover packet loss, bandwidth limits, DTX or constrained VBR, nor low complexity).
 
 ## Translation rules
 
@@ -161,9 +178,10 @@ both variants.
   `float2int` (`lrintf`) would be `libm::rintf` (round half to even); the encoder does not
   use it.
   `floor(.5+x)` stays exactly that.
-- Arrays: prefer slices (`&[f32]`, `&mut [i32]`), indexed with `arch::Ix` (`x.at(i)`,
-  `*x.at_mut(i) = v`, `x.rg(a..b)`, `x.rg_mut(a..b)`: unchecked in release, checked in the
-  `checked` profile). Where C uses negative offsets or pointer arithmetic into a larger buffer,
+- Arrays: prefer slices (`&[f32]`, `&mut [i32]`), indexed plainly where the bounds are provable and
+  with `arch::Ix` (`x.at(i)`, `*x.at_mut(i) = v`, `x.rg(a..b)`, `x.rg_mut(a..b)`: unchecked in release,
+  checked in the `checked` profile) where they are not (see "Bounds checks" above).
+  Where C uses negative offsets or pointer arithmetic into a larger buffer,
   pass the buffer plus an offset, or use raw pointers; `unsafe` is allowed anywhere. C argument
   order is kept; `const T *` → `&[T]`, `T *` output → `&mut [T]` / `&mut T`.
 - `celt_assert`/`celt_sig_assert` → `debug_assert!`. Drop `arch` parameters.

@@ -105,8 +105,9 @@ pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], end: i32, C: i32) {
 }
 
 /// Normalise each band such that the energy is one.
-// IX-MIXED: `bandE.at(i + c * nbEBands)` is EASY (re-slice per channel); `freq`/`X` at `M * eBands[i] + j`
-// is HARD (offset from the band table).
+// IX-HARD: `freq`/`X` at `M * eBands[i] + j`: offsets from the band table, no length to prove them against.
+// The `bandE.at(i + c * nbEBands)` read (a per-channel re-slice would do) is left on `Ix` too: the function
+// keeps `Ix` for the other sites, and the conversion was not measured.
 pub fn normalise_bands(freq: &[f32], X: &mut [f32], bandE: &[f32], end: i32, C: i32) {
     /* M == 8 */
     let M = 8;
@@ -139,7 +140,9 @@ fn compute_channel_weights(mut Ex: f32, mut Ey: f32, w: &mut [f32; 2]) {
     w[1] = Ey;
 }
 
-// IX-MIXED: the `X`/`Y` loop over `N` is EASY (re-slice); `bandE.at(bandID)`/`at(bandID + nbEBands)` is HARD.
+// IX-HARD: `bandE.at(bandID)`/`at(bandID + nbEBands)`: `bandID` is the caller's band counter. The `X`/`Y`
+// loop over `N` (a re-slice to `N` would do) is left on `Ix` too, because the function keeps `Ix` for `bandE`
+// anyway; not measured.
 fn intensity_stereo(X: &mut [f32], Y: &[f32], bandE: &[f32], bandID: i32, N: i32) {
     let i = bandID as usize;
     let left = bandE.at(i);
@@ -189,8 +192,9 @@ fn stereo_merge(X: &mut [f32], Y: &mut [f32], mid: f32, N: i32) {
 }
 
 /// Decide whether we should spread the pulses in the current frame
-// IX-MIXED: `tcount[0..3]` (constant) and `spread_weight.at(i)` are EASY; `eBands.at(i)` is bounded by
-// the caller's `end`, and `x.at(j)` (`X.rg(M * eBands[i] + c * N0..)`) is HARD.
+// IX-HARD: `x.at(j)` over `X.rg(M * eBands[i] + c * N0..)` (offset from the band table, and the per-sample
+// loop of this function) and `eBands.at(i)` (bounded only by the caller's `end`). `tcount[0..3]` (constant
+// indices into `[i32; 3]`) and `spread_weight.at(i)` are left on `Ix` as well; not measured.
 pub fn spreading_decision(
     X: &[f32],
     average: &mut i32,
@@ -297,8 +301,9 @@ static ordery_table: [i32; 30] = [
     15, 0, 8, 7, 12, 3, 11, 4, 14, 1, 9, 6, 13, 2, 10, 5,
 ];
 
-// IX-MIXED: `ordery_table.rg(stride - 2..)` is HARD (`stride` from the caller); the strided `X`/`tmp`
-// accesses (`j * stride + i < N`) are EASY with `chunks_exact(stride)` or a re-slice to `N`.
+// IX-HARD: `ordery_table.rg(stride - 2..)` (`stride` from the caller). The strided `X`/`tmp` accesses
+// (`j * stride + i < N`) have the shape of `haar1`, whose `chunks_exact_mut` form cost +1.0% encode time
+// (`haar1` is IX-HARD for that), so they are not converted.
 fn deinterleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
@@ -322,8 +327,9 @@ fn deinterleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     X.rg_mut(..N).copy_from_slice(tmp);
 }
 
-// IX-MIXED: `ordery_table.rg(stride - 2..)` is HARD (`stride` from the caller); the strided `X`/`tmp`
-// accesses (`j * stride + i < N`) are EASY with `chunks_exact(stride)` or a re-slice to `N`.
+// IX-HARD: `ordery_table.rg(stride - 2..)` (`stride` from the caller). The strided `X`/`tmp` accesses
+// (`j * stride + i < N`) have the shape of `haar1`, whose `chunks_exact_mut` form cost +1.0% encode time
+// (`haar1` is IX-HARD for that), so they are not converted.
 fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
@@ -742,8 +748,9 @@ unsafe fn quant_partition(
 /// # Safety
 /// `X` valid for `N` floats; `lowband`, `lowband_out`, `lowband_scratch` (each nullable) valid
 /// for `N` floats; `lowband_scratch` must not overlap `X` or `lowband`.
-// IX-MIXED: `bit_interleave_table.at(fill & 0xF)` is EASY (mask); `bit_deinterleave_table.at(cm)` is HARD
-// (`cm` is a collapse mask accumulated from the coded bands); `x.at(j)` loop over `N` is EASY.
+// IX-HARD: `bit_deinterleave_table.at(cm)` (`cm` is a collapse mask accumulated from the coded bands, no bound
+// but the table). The masked `bit_interleave_table.at(fill & 0xF)` and the `x.at(j)` loop over `N` are left
+// on `Ix` too, since the function keeps `Ix` for `cm`; not measured.
 unsafe fn quant_band(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -1023,8 +1030,9 @@ unsafe fn quant_band_stereo(
 ///
 /// `X_` and `Y_` are the two channels of the normalised spectrum (in C, `X` and `X+N` of one
 /// buffer); each must hold at least `M*eBands[end]` values. `Y_` is `None` for mono.
-// IX-MIXED: `pulses.at(i)`, `tf_res.at(i)`, `bandE.at(i)` over `start..end` are EASY (re-slice to `end`);
-// `collapse_masks.at(fold_i * C ..)` (`fold_i` from the folding search) and the `save`-buffer ranges are HARD.
+// IX-HARD: `collapse_masks.at(fold_i * C ..)` (`fold_i` from the folding search) and the `save`-buffer ranges
+// (lengths from the band widths). The band-level `pulses.at(i)`, `tf_res.at(i)`, `bandE.at(i)` over
+// `start..end` (a re-slice to `end` would do) are left on `Ix` too; not measured.
 pub fn quant_all_bands(
     end: i32,
     X_: &mut [f32],

@@ -75,8 +75,13 @@ pub fn floor64(x: f64) -> f64 {
 /// `rg`/`rg_mut` replace `x[a..b]`, `&x[a..]`, ...). With debug assertions on (the `checked`
 /// profile that the tests run) they are the ordinary bounds-checked operations, so an index that
 /// is out of range traps there. The callers' indices are in range by construction, as in the C
-/// code; the release build thereby drops several hundred panic sites and their source locations
-/// (about 15 % of the module).
+/// code.
+///
+/// Use it only where the compiler cannot be given a proof: indices read out of tables or computed
+/// from coded values, caller-sized slices indexed at offsets from the band table, and per-sample
+/// loops where an iterator or re-slice form measured slower. Everywhere else use plain indexing,
+/// iterators or re-slices, which are checked in every profile. Every function that still uses `Ix`
+/// carries an `IX-HARD` comment with the reason (and the measured cost where a conversion was tried).
 pub trait Ix<T: Copy> {
     fn at(&self, i: usize) -> T;
     fn at_mut(&mut self, i: usize) -> &mut T;
