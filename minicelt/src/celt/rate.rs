@@ -1,6 +1,5 @@
 //! Port of celt/rate.h and celt/rate.c (encoder side; static pulse cache).
 
-use super::arch::Ix;
 use super::arch::{IMAX, IMIN};
 use super::entcode::{ec_ctx, celt_udiv, BITRES};
 use super::entenc::{ec_enc_bit_logp, ec_enc_uint};
@@ -340,7 +339,6 @@ fn interp_bits2pulses(
 /// Compute the pulse allocation, i.e. how many pulses will go in each band
 /// (always encoding; `pulses` receives the bits per band).
 /// Returns codedBands.
-// IX-HARD: `allocVectors.at(mid * len + j)` and `LOG2_FRAC_TABLE.at(end - start)`: table-driven indices.
 pub fn clt_compute_allocation(
     end: i32, offsets: &[i32], cap: &[i32], alloc_trim: i32,
     intensity: &mut i32, dual_stereo: &mut i32, mut total: i32, balance: &mut i32, pulses: &mut [i32],
@@ -362,7 +360,7 @@ pub fn clt_compute_allocation(
     let mut intensity_rsv = 0;
     let mut dual_stereo_rsv = 0;
     if C == 2 {
-        intensity_rsv = LOG2_FRAC_TABLE.at((end - start) as usize) as i32;
+        intensity_rsv = LOG2_FRAC_TABLE[(end - start) as usize] as i32;
         if intensity_rsv > total {
             intensity_rsv = 0;
         } else {
@@ -379,6 +377,9 @@ pub fn clt_compute_allocation(
     let eu = end as usize;
     let (offsets, cap) = (&offsets[..eu], &cap[..eu]);
     let (bits1, bits2, thresh, trim_offset) = (&mut bits1[..eu], &mut bits2[..eu], &mut thresh[..eu], &mut trim_offset[..eu]);
+    /* the allocation vectors, one row of nbEBands per quality level, cut to `end` */
+    let alloc_rows = modes::allocVectors.as_chunks::<{ modes::nbEBands as usize }>().0;
+    let alloc = |q: i32| &alloc_rows[q as usize][..eu];
 
     for j in start..end {
         let ju = j as usize;
@@ -399,12 +400,13 @@ pub fn clt_compute_allocation(
         let mut done = false;
         let mut psum = 0;
         let mid = (lo + hi) >> 1;
+        let alloc_mid = alloc(mid);
         let mut j = end;
         while j > start {
             j -= 1;
             let ju = j as usize;
             let N = eb(j + 1) - eb(j);
-            let mut bitsj = C * N * (modes::allocVectors.at((mid * len + j) as usize) as i32) << LM >> 2;
+            let mut bitsj = C * N * (alloc_mid[ju] as i32) << LM >> 2;
             if bitsj > 0 {
                 bitsj = IMAX(0, bitsj + trim_offset[ju]);
             }
@@ -428,14 +430,16 @@ pub fn clt_compute_allocation(
     }
     hi = lo;
     lo -= 1;
+    let alloc_lo = alloc(lo);
+    /* hi == nbAllocVectors: the cap */
+    let alloc_hi = alloc_rows.get(hi as usize).map(|r| &r[..eu]);
     for j in start..end {
         let ju = j as usize;
         let N = eb(j + 1) - eb(j);
-        let mut bits1j = C * N * (modes::allocVectors.at((lo * len + j) as usize) as i32) << LM >> 2;
-        let mut bits2j = if hi >= modes::nbAllocVectors {
-            cap[ju]
-        } else {
-            C * N * (modes::allocVectors.at((hi * len + j) as usize) as i32) << LM >> 2
+        let mut bits1j = C * N * (alloc_lo[ju] as i32) << LM >> 2;
+        let mut bits2j = match alloc_hi {
+            None => cap[ju],
+            Some(alloc_hi) => C * N * (alloc_hi[ju] as i32) << LM >> 2,
         };
         if bits1j > 0 {
             bits1j = IMAX(0, bits1j + trim_offset[ju]);
