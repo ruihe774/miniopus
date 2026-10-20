@@ -1,0 +1,17 @@
+[package]
+name = "bench-host"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[features]
+wasmtime = ["dep:wasmtime"]
+wasmer = ["dep:wasmer"]
+
+[dependencies]
+wasmtime = { version = "*", optional = true }
+wasmer = { version = "*", optional = true, default-features = false, features = ["sys", "cranelift"] }
+
+[profile.release]
+opt-level = 3
