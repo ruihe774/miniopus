@@ -99,12 +99,11 @@ unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
 }
 
 /// `xcorr[i] = sum_j _x[j] * _y[i + j]` for i in 0..max_pitch. Reads `_y[0..len + max_pitch - 1]`.
-// IX-HARD: `xcorr.at_mut(i)` in the tail loop; tried `&mut xcorr[..max_pitch]` up front: the extra panic
-// site costs more (+49 bytes) than the one check it removes.
 pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max_pitch: i32) {
     debug_assert!(max_pitch > 0);
     let (len, max_pitch) = (len.max(0) as usize, max_pitch.max(0) as usize);
-    debug_assert!(_x.len() >= len && xcorr.len() >= max_pitch);
+    let xcorr = &mut xcorr[..max_pitch];
+    debug_assert!(_x.len() >= len);
     debug_assert!(_y.len() + 1 >= len + max_pitch);
     let (px, py, po) = (_x.as_ptr(), _y.as_ptr(), xcorr.as_mut_ptr());
     // SAFETY: the C kernel's accesses stay within _x[0..len], _y[0..len+max_pitch-1] and
@@ -154,7 +153,7 @@ pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max
         }
         /* In case max_pitch isn't a multiple of 4, do non-unrolled version. */
         while i < max_pitch {
-            *xcorr.at_mut(i) = celt_inner_prod(_x, &_y[i..], len as i32);
+            xcorr[i] = celt_inner_prod(_x, &_y[i..], len as i32);
             i += 1;
         }
     }
@@ -265,20 +264,20 @@ pub unsafe fn comb_filter_const(
 }
 
 /// Finds the two best pitch candidates (by xcorr^2 / energy) into `best_pitch`.
-// IX-HARD: `xcorr.at(i)`, `y.at(j | i | i + len)`: tried re-slicing `xcorr[..max_pitch]`, `y[..max_pitch + len]`
-// and a zip over `y[..max_pitch]`/`y[len..]`: the new panic sites cost +40..50 bytes. (`best_*` are plain.)
 fn find_best_pitch(xcorr: &[f32], y: &[f32], len: i32, max_pitch: i32, best_pitch: &mut [i32; 2]) {
     let (len, max_pitch) = (len as usize, max_pitch as usize);
+    let xcorr = &xcorr[..max_pitch];
+    let y = &y[..max_pitch + len];
     let mut Syy: f32 = 1.0;
     let mut best_num: [f32; 2] = [-1.0, -1.0];
     let mut best_den: [f32; 2] = [0.0, 0.0];
     *best_pitch = [0, 1];
     for j in 0..len {
-        Syy = Syy + y.at(j) * y.at(j);
+        Syy = Syy + y[j] * y[j];
     }
     for i in 0..max_pitch {
-        if xcorr.at(i) > 0.0 {
-            let mut xcorr16: f32 = xcorr.at(i);
+        if xcorr[i] > 0.0 {
+            let mut xcorr16: f32 = xcorr[i];
             /* Considering the range of xcorr16, this should avoid both underflows
             and overflows (inf) when squaring xcorr16 */
             xcorr16 *= 1e-12;
@@ -298,7 +297,7 @@ fn find_best_pitch(xcorr: &[f32], y: &[f32], len: i32, max_pitch: i32, best_pitc
                 }
             }
         }
-        Syy += y.at(i + len) * y.at(i + len) - y.at(i) * y.at(i);
+        Syy += y[i + len] * y[i + len] - y[i] * y[i];
         Syy = MAX32(1.0, Syy);
     }
 }
@@ -378,8 +377,6 @@ pub fn pitch_downsample_factor2(hist: &[f32], new: &[f32], new_off: usize, new_s
 }
 
 /// Reads `x_lp[0..len/2]`, `y[0..len/2 + max_pitch/2]` (and the decimated copies of them).
-// IX-HARD: the strided copies `x_lp4[j] = x_lp[2 * j]`, `y_lp4[j] = y[2 * j]` (tried `zip` with `step_by(2)`:
-// +74 bytes), `xcorr.at(b0 - 1 ..= b0 + 1)` and `y.rg(i..)`; `best_pitch` and the `xcorr` loop are plain.
 pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &mut i32) {
     let mut best_pitch: [i32; 2] = [0, 0];
     let st = stack::save();
@@ -393,11 +390,11 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
     let xcorr = st.alloc::<f32>((max_pitch >> 1) as usize);
 
     /* Downsample by 2 again */
-    for j in 0..(len >> 2) as usize {
-        *x_lp4.at_mut(j) = x_lp.at(2 * j);
+    for (d, &s) in x_lp4.iter_mut().zip(x_lp.iter().step_by(2)) {
+        *d = s;
     }
-    for j in 0..(lag >> 2) as usize {
-        *y_lp4.at_mut(j) = y.at(2 * j);
+    for (d, &s) in y_lp4.iter_mut().zip(y.iter().step_by(2)) {
+        *d = s;
     }
 
     /* Coarse search with 4x decimation */
@@ -412,7 +409,7 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
         if (i - 2 * best_pitch[0]).abs() > 2 && (i - 2 * best_pitch[1]).abs() > 2 {
             continue;
         }
-        let sum = celt_inner_prod(x_lp, y.rg(i as usize..), len >> 1);
+        let sum = celt_inner_prod(x_lp, &y[i as usize..], len >> 1);
         *xc = MAX32(-1.0, sum);
     }
     find_best_pitch(xcorr, y, len >> 1, max_pitch >> 1, &mut best_pitch);
@@ -421,9 +418,8 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
     let offset: i32;
     if best_pitch[0] > 0 && best_pitch[0] < (max_pitch >> 1) - 1 {
         let b0 = best_pitch[0] as usize;
-        let a = xcorr.at(b0 - 1);
-        let b = xcorr.at(b0);
-        let c = xcorr.at(b0 + 1);
+        let w = &xcorr[b0 - 1..b0 + 2];
+        let (a, b, c) = (w[0], w[1], w[2]);
         if (c - a) > 0.7 * (b - a) {
             offset = 1;
         } else if (a - c) > 0.7 * (b - c) {
@@ -445,9 +441,7 @@ static second_check: [i32; 16] = [0, 0, 3, 2, 3, 2, 5, 2, 3, 2, 3, 2, 5, 2, 3, 2
 
 /// `x` is the start of the buffer; C's `x += maxperiod` (halved) is applied internally, and
 /// the function reads `x[0 .. maxperiod/2 + N/2]` (no data before the buffer start).
-// IX-MIXED: `x.at(base - i)` loop and `yy_lookup.at_mut(i)` could be re-sliced (size-neutral when tried, so
-// left); `yy_lookup.at(T0 | T1 | T1b)` and `x.rg(base - T1 ..)` (periods searched at run time) are HARD.
-// (`xcorr` and `second_check` are plain.)
+// IX-HARD: `yy_lookup.at(T0 | T1 | T1b)` and `x.rg(base - T1 ..)`: periods searched at run time.
 pub fn remove_doubling(
     x: &[f32],
     mut maxperiod: i32,
@@ -483,11 +477,12 @@ pub fn remove_doubling(
     T0 = T;
     let yy_lookup = st.alloc::<f32>(maxperiod as usize + 1);
     dual_inner_prod(x.rg(base..), x.rg(base..), x.rg(base - T0 as usize..), N, &mut xx, &mut xy);
-    *yy_lookup.at_mut(0) = xx;
+    yy_lookup[0] = xx;
     let mut yy = xx;
-    for i in 1..=maxperiod as usize {
-        yy = yy + x.at(base - i) * x.at(base - i) - x.at(base + nn - i) * x.at(base + nn - i);
-        *yy_lookup.at_mut(i) = MAX32(0.0, yy);
+    let xw = &x[..base + nn];
+    for i in 1..=base {
+        yy = yy + xw[base - i] * xw[base - i] - xw[base + nn - i] * xw[base + nn - i];
+        yy_lookup[i] = MAX32(0.0, yy);
     }
     yy = yy_lookup.at(T0 as usize);
     let mut best_xy = xy;

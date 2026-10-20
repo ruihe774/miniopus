@@ -168,14 +168,14 @@ fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
     }
 }
 
-// IX-HARD: `Fout.rg_mut(o..o + 4)`, `Fout.at(fo + k * m)` and `tw.at(k * fstride)`: offsets from the runtime
-// `m`, `mm`, `fstride`. (`scratch` and the four `f[..]` of the `m == 1` branch are plain.)
+// IX-HARD: `Fout.at(fo + k * m)` and `tw.at(k * fstride)`: offsets from the runtime `m`, `mm`, `fstride`.
+// (`scratch` and the `m == 1` branch, via `as_chunks_mut::<4>`, are plain.) Tried `split_at_mut` into four
+// sub-slices + zip + `tw.iter().step_by(k * fstride)`: no panic branch in the loop, but +560 B for this
+// function (+340 bfly3, +460 bfly5) and encode time +0.5 %, so the checked-free `Ix` form stays.
 fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     if m == 1 {
         /* Degenerate case where all the twiddles are 1. */
-        let mut o = 0usize;
-        for _ in 0..N {
-            let f = Fout.rg_mut(o..o + 4);
+        for f in &mut Fout.as_chunks_mut::<4>().0[..N as usize] {
             let scratch0 = C_SUB(f[0], f[2]);
             let f2 = f[2];
             C_ADDTO(&mut f[0], f2);
@@ -188,7 +188,6 @@ fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
             f[1].i = scratch0.i - scratch1.r;
             f[3].r = scratch0.r - scratch1.i;
             f[3].i = scratch0.i + scratch1.r;
-            o += 4;
         }
     } else {
         let mut scratch = [kiss_fft_cpx::default(); 6];
@@ -225,7 +224,7 @@ fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 }
 
 // IX-HARD: `Fout.at(fo + k * m)` and `tw.at(..)`: offsets from the runtime `m`, `mm`, `fstride`.
-// (`scratch` is plain.)
+// (`scratch` is plain.) The split_at_mut/zip/step_by form costs +340 B (see `kf_bfly4`).
 fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let m2 = 2 * m;
@@ -270,7 +269,7 @@ fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 }
 
 // IX-HARD: `Fout.at(f1..f4 + u)` and `tw.at(k * u * fstride)`: offsets from the runtime `m`, `mm`, `fstride`.
-// (`scratch` is plain.)
+// (`scratch` is plain.) The split_at_mut/zip/step_by form costs +460 B (see `kf_bfly4`).
 fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let mut scratch = [kiss_fft_cpx::default(); 13];
