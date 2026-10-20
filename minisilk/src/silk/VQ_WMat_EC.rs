@@ -67,6 +67,8 @@ pub fn silk_VQ_WMat_EC(
 
             /* Transpose the 4 x 5 codebook block (20 bytes) to one vector per coefficient */
             let row = &cb_flat[cb_row..cb_row + 20];
+            // SAFETY: `row` is a 20-byte slice (bounds-checked above): the loads read row[0..16]
+            // and row[4..20].
             let (v0, v1) = unsafe {
                 (v128_load(row.as_ptr() as *const v128), v128_load(row.as_ptr().add(4) as *const v128))
             };
@@ -119,6 +121,7 @@ pub fn silk_VQ_WMat_EC(
             sum2 = i32x4_add(sum2, i32x4_mul(i32x4_splat(XX_Q17[24]), cb4));
             sum1 = i32x4_add(sum1, silk_SMULWB_wasm(sum2, cb4));
 
+            // SAFETY: `sum1_Q15_buf` is a [i32; 4], exactly 16 writable bytes.
             unsafe { v128_store(sum1_Q15_buf.as_mut_ptr() as *mut v128, sum1) };
             n = 4;
         } else {

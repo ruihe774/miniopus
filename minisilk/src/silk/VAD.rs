@@ -49,6 +49,9 @@ static tiltWeights: [i32; VAD_N_BANDS_] = [30000, 6000, -12000, -12000];
 /// the 32-bit accumulation cannot overflow for len <= 128.
 #[inline(always)]
 unsafe fn silk_VAD_energy_wasm(x: *const i16, len: i32) -> i32 {
+    // SAFETY: the caller guarantees x[0..len] is readable. The 8-lane load reads x[i..i + 8] with
+    // i < len - 7, the 4-lane `load64_zero` reads x[i..i + 4] with i < len - 3, and the scalar tail
+    // reads x[i] with i < len.
     unsafe {
         let mut i: i32;
         let mut sum: i32;
@@ -90,6 +93,11 @@ pub unsafe fn silk_VAD_GetSA_Q8(
     psEncC: *mut silk_encoder_state, /* I/O  Encoder state                               */
     pIn: *const i16,                 /* I    PCM input                                   */
 ) {
+    // SAFETY: `psEncC` is a valid, exclusive encoder state and `pIn` points to `frame_length`
+    // (MAX_FRAME_LENGTH) readable samples (its only caller passes `inputBuf`, an array of that
+    // length). `X` is a scratch buffer of X_offset[3] + frame_length / 2 samples; the three
+    // analysis filter banks write `frame_length / 2`, `/ 4` and `/ 8` samples to the offsets
+    // above, which fit in it by construction of `X_offset`.
     unsafe {
         let mut SA_Q15: i32;
         let pSNR_dB_Q7: i32;

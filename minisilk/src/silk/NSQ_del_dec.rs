@@ -46,11 +46,14 @@ struct NSQ_del_decs_wasm_struct {
 
 #[inline(always)]
 fn LD(p: &[i32; WASM_DEL_DEC_STATES]) -> v128 {
+    // SAFETY: `p` is a reference to exactly 4 i32 (WASM_DEL_DEC_STATES == 4), i.e. 16 readable
+    // bytes; v128_load has no alignment requirement.
     unsafe { v128_load(p.as_ptr() as *const v128) }
 }
 
 #[inline(always)]
 fn ST(p: &mut [i32; WASM_DEL_DEC_STATES], v: v128) {
+    // SAFETY: as in `LD`: `p` is exactly 16 writable bytes.
     unsafe { v128_store(p.as_mut_ptr() as *mut v128, v) }
 }
 
@@ -195,6 +198,17 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
     smpl_buf_idx: &mut i32,                     /* I/O  Index to newest samples in buffers  */
     decisionDelay: i32,                         /* I                                        */
 ) {
+    // SAFETY: all vector accesses go through `LD`/`ST` on `[i32; 4]` rows of `psDelDec`, indexed
+    // with ordinary (bounds-checked) slice indexing. The raw pointers are bounded by the
+    // debug_asserts below: sLTP_shp / sLTP_Q15 / xq are written at the running buffer indices,
+    // which stay within their arrays for `length` samples (sLTP_buf_idx + length <=
+    // sLTP_Q15.len(), sLTP_shp_buf_idx + length <= sLTP_shp_Q14.len(), xq_off + length <=
+    // xq.len()). `pulses` and `xq` are written at offsets i - decisionDelay in
+    // [-decisionDelay, length - decisionDelay) (only once i >= decisionDelay or subfr > 0, and
+    // xq_off >= decisionDelay); `pulses` has room for that as the caller passes the subframe
+    // start of a frame_length buffer, and negative offsets only occur after the first
+    // decisionDelay samples of the frame (subfr > 0). The lag pointers read up to 4 entries below their start,
+    // non-negative offsets by the asserts on lag.
     unsafe {
         let mut Winner_ind: usize;
         let mut RDmin_ind: usize;
@@ -573,6 +587,10 @@ unsafe fn silk_copy_winner_state_wasm(
     gain: i32,
     shift: i32,
 ) {
+    // SAFETY: the only calls are at the start of subframe 2 and after the last subframe, so
+    // `pulses` is at least 2 * MAX_SUB_FRAME_LENGTH entries into the frame's pulse buffer and
+    // the offsets [-decisionDelay, 0) (decisionDelay <= DECISION_DELAY = 40 <= 160) are in
+    // range; the xq / sLTP_shp writes are bounds-checked slice indexing.
     unsafe {
         debug_assert!(pxq_off >= decisionDelay as usize);
         let mut last_smple_idx = smpl_buf_idx + decisionDelay;
@@ -613,6 +631,10 @@ pub unsafe fn silk_NSQ_del_dec(
     Lambda_Q10: i32,                   /* I    Rate/distortion tradeoff        */
     LTP_scale_Q14: i32,                /* I    LTP state scaling               */
 ) {
+    // SAFETY: `psEncC`, `NSQ` and `psIndices` are valid (see above) and `pulses` has frame_length
+    // entries: it is advanced by subfr_length once per subframe, nb_subfr times. The scratch
+    // buffers hold (ltp_mem_length + frame_length) entries, which bounds the sLTP indices used by
+    // the kernels called below; the `LD`/`ST` calls here are on `[i32; 4]` rows.
     unsafe {
         let subfr_length = MAX_SUB_FRAME_LENGTH;
         let ltp_mem_length = LTP_MEM_LENGTH;
@@ -841,6 +863,10 @@ unsafe fn silk_nsq_del_dec_scale_states_wasm(
     signal_type: i32,                        /* I    Signal type                         */
     decisionDelay: i32,                      /* I    Decision delay                      */
 ) {
+    // SAFETY: as in `silk_nsq_scale_states_wasm` (NSQ.rs): the x16 / x_sc_Q10 pointers come from
+    // slices cut to `subfr_length` and the 4-lane loops run only while i < limit - 3; the sLTP,
+    // sLTP_Q15 and sLTP_shp_Q14 ranges start at i >= 0 and end at or below the buffer lengths
+    // (the debug_asserts below).
     unsafe {
         let mut i: i32;
         let mut g: v128;

@@ -114,6 +114,9 @@ fn LPC_inverse_pred_gain_QA_wasm(A_QA: &mut [i32; MAX_LPC_ORDER as usize], order
             /* tmp1 = A_QA[ n + {0,1,2,3} ], tmp2 = A_QA[ k - n - 1 - {0,1,2,3} ].
             When k is odd, the middle coefficient may be in both vectors; both then
             compute and store the same value. */
+            // SAFETY: the loop condition gives n + 4 <= (k + 1) >> 1, so p1 reads/writes
+            // A_QA[n..n + 4] and p2 reads/writes A_QA[k - n - 4..k - n] with k - n - 4 >=
+            // k - ((k + 1) >> 1) >= 0 and k - n <= k < order <= MAX_LPC_ORDER = A_QA.len().
             unsafe {
                 let p1 = A_QA.as_mut_ptr().add(n as usize);
                 let p2 = A_QA.as_mut_ptr().add((k - n - 4) as usize);
@@ -190,8 +193,11 @@ pub fn silk_LPC_inverse_pred_gain(A_Q12: &[i16], order: i32) -> i32 {
     /* Increase Q domain of the AR coefficients */
     let mut dc = i32x4_splat(0);
     while k < order - 7 {
+        // SAFETY: k + 8 <= order <= A_Q12.len() (debug_assert above) and order <= MAX_LPC_ORDER =
+        // Atmp_QA.len(), so the 8-lane load from A_Q12 and the two 4-lane stores to Atmp_QA
+        // (k..k + 4, k + 4..k + 8) are in range.
         unsafe {
-            let a = v128_load(A_Q12.as_ptr().add(k as usize) as *const v128);
+            let a =v128_load(A_Q12.as_ptr().add(k as usize) as *const v128);
             dc = i32x4_add(dc, i32x4_dot_i16x8(a, i16x8_splat(1)));
             v128_store(
                 Atmp_QA.as_mut_ptr().add(k as usize) as *mut v128,

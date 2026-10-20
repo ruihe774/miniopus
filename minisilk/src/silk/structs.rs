@@ -1,7 +1,6 @@
 //! Port of silk/structs.h (encoder side). Only the state the fixed configuration (16 kHz mono,
 //! 20 ms frames, no LBRR, no stereo, no resampler) reads or writes is kept.
 
-#![allow(non_camel_case_types, non_snake_case)]
 
 use crate::silk::define::*;
 

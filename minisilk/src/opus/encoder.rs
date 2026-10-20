@@ -159,7 +159,7 @@ impl OpusEncoder {
 
     /// `OPUS_SET_COMPLEXITY` (0..=10).
     pub fn set_complexity(&mut self, value: i32) -> i32 {
-        if !(0..=10).contains(&value) {
+        if value < 0 || value > 10 {
             return OPUS_BAD_ARG;
         }
         self.complexity = value;
@@ -168,7 +168,7 @@ impl OpusEncoder {
 
     /// `OPUS_SET_DTX` (0 or 1).
     pub fn set_dtx(&mut self, value: i32) -> i32 {
-        if !(0..=1).contains(&value) {
+        if value < 0 || value > 1 {
             return OPUS_BAD_ARG;
         }
         self.use_dtx = value;
@@ -177,7 +177,7 @@ impl OpusEncoder {
 
     /// `OPUS_SET_PACKET_LOSS_PERC` (0..=100).
     pub fn set_packet_loss_perc(&mut self, value: i32) -> i32 {
-        if !(0..=100).contains(&value) {
+        if value < 0 || value > 100 {
             return OPUS_BAD_ARG;
         }
         self.packetLossPercentage = value;
@@ -296,7 +296,7 @@ impl OpusEncoder {
         /* This should filter out both NaNs and ridiculous signals that could
         cause NaNs further down. */
         let sum = celt_inner_prod(&pcm_buf, &pcm_buf, FRAME_SIZE);
-        if !(sum < 1e9f32) || sum.is_nan() {
+        if !(sum < 1e9f32) || sum != sum {
             pcm_buf = [0f32; FRAME_SIZE as usize];
             self.hp_mem = 0.0;
         }

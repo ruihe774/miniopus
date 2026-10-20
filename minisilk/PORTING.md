@@ -3,7 +3,8 @@
 minisilk is a mechanical Rust port of the libopus SILK-only float encoder
 (`OPUS_APPLICATION_RESTRICTED_SILK`), for wasm32 only. C source: libopus 1.6.1
 plus a fork's WASM SIMD / relaxed SIMD kernels (https://github.com/ruihe774/opus-wasm-simd,
-branch `v1.6.1-wasm-simd`; not vendored here). The kernels are bit-exact with the scalar C, so the
+branch `v1.6.1-wasm-simd`; not vendored here, fetch it to port). Do not use the fork's `wasm-simd`
+branch: it is based on post-1.6.1 upstream, whose scalar code behaves differently. The kernels are bit-exact with the scalar C, so the
 reference for testing is plain upstream libopus (`third_party/opus`), compared bit-exactly. Upstream's own
 SIMD builds are bit-exact with scalar for this configuration too (`scripts/variance.ts`: 0 differing runs
 in about 4000 on aarch64 NEON and on x86-64 AVX2).
@@ -24,7 +25,8 @@ in about 4000 on aarch64 NEON and on x86-64 AVX2).
   are gone.
 - The state structs keep only what the configuration reads or writes (no `silk_EncControlStruct`
   - its fields are arguments of `silk_Encode` -, stereo state, LBRR buffers, resampler state,
-  bandwidth-switch state, `sLP`, ...). They are `#[repr(C)]` but no longer mirror the C layout.
+  bandwidth-switch state, `sLP`, ...). They are plain Rust structs (no `#[repr(C)]`) and do not
+  mirror the C layout; nothing depends on field order or offsets.
 - Float path only (`silk/float`, no `FIXED_POINT`).
 - Where the fork has a WASM SIMD kernel (`silk/wasm`, `silk/float/wasm`,
   `celt/wasm`), port **that** kernel with `core::arch::wasm32` and drop the
@@ -36,6 +38,15 @@ in about 4000 on aarch64 NEON and on x86-64 AVX2).
   nb_subfr == 2, stereo, LBRR, CBR) are removed, state included; leave a `debug_assert!` of
   the assumption where it is cheap. Size (code and memory) is the main optimization, so do not
   add them back "for completeness"; git has them.
+
+## Trimming
+
+The crate is trimmed to the fixed configuration (see "Fixed configuration" above for what was
+removed or specialised: other rates, frame sizes, stereo, FEC/LBRR, CBR, the resampler, the
+conditional-coding paths and the state that went with them, the scalar versions of kernels the fork
+has in SIMD). Size (code and memory) is the main optimization, and git has what was removed. Rule for
+what to keep when changing it: delete what produces no difference (numbers or bitstream) in the
+configuration, and check with the bit-exact comparison (see Tests).
 
 ## Layout
 
@@ -96,7 +107,7 @@ Everything is static (`no_std`, no allocator), so the linear memory is stack + d
 the stack first (overflow traps at address < 0):
 
 - Shadow stack (the Rust call stack): `wasm/build.rs` sets it to 48 KiB (default 1 MiB; the
-  `MINISILK_STACK_SIZE` env var overrides it). Deepest use measured: 36280 bytes (release) and
+  `MINISILK_SHADOW_STACK` env var overrides it). Deepest use measured: 36280 bytes (release) and
   35248 (`checked`), all builds.
 - Pseudostack (`src/stack.rs`, `GLOBAL_STACK_SIZE`): 5504 bytes. Measured peak 5436 bytes: the
   `ec_buf_copy` of `silk_encode_frame_FLP` (1276 with alignment) plus the `silk_NSQ` scratch (4160).
@@ -110,7 +121,7 @@ x i16/f32 over the corpus and the synthetic signals, painting the stack region t
 stack depth:
 
 ```sh
-MINISILK_STACK_SIZE=1048576 cargo build --release -p minisilk-wasm --target wasm32-unknown-unknown \
+MINISILK_SHADOW_STACK=1048576 cargo build --release -p minisilk-wasm --target wasm32-unknown-unknown \
   --features stack-peak --target-dir target/stack-peak \
   --config 'target.wasm32-unknown-unknown.rustflags=["-Ctarget-feature=+simd128"]'
 deno run --allow-read minisilk/test/stack_peak.ts target/stack-peak/wasm32-unknown-unknown/release/minisilk_wasm.wasm

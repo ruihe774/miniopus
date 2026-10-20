@@ -1,7 +1,6 @@
 //! Port of the inline helpers of silk/float/SigProc_FLP.h, plus `float2int` from
 //! celt/float_cast.h (wasm path: `__builtin_rintf`, i.e. round half to even, saturating).
 
-#![allow(non_snake_case, dead_code)]
 
 use crate::silk::macros::silk_SAT16;
 

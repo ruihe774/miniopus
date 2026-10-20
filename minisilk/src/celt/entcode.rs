@@ -1,6 +1,5 @@
 //! Port of celt/entcode.h and celt/entcode.c (encoder side).
 
-#![allow(non_camel_case_types)]
 
 /// The entropy encoder/decoder context.
 pub struct ec_ctx {

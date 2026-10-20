@@ -20,6 +20,7 @@ const FRAME: usize = 320;
 const OUT_CAP: usize = 1276;
 
 static mut ENCODER: OpusEncoder = OpusEncoder::new_zeroed();
+static mut INITIALISED: bool = false;
 static mut INPUT_F32: [f32; FRAME] = [0.0; FRAME];
 static mut INPUT_I16: [i16; FRAME] = [0; FRAME];
 static mut OUTPUT: [u8; OUT_CAP] = [0; OUT_CAP];
@@ -35,19 +36,27 @@ fn enc() -> &'static mut OpusEncoder {
     unsafe { &mut *addr_of_mut!(ENCODER) }
 }
 
+fn initialised() -> bool {
+    unsafe { *addr_of_mut!(INITIALISED) }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn minisilk_init(bitrate: i32, complexity: i32, dtx: i32) -> i32 {
+    unsafe { *addr_of_mut!(INITIALISED) = false };
     let e = enc();
     e.init();
-    let r = e.set_bitrate(bitrate);
-    if r < 0 {
-        return r;
+    let mut r = e.set_bitrate(bitrate);
+    if r >= 0 {
+        r = e.set_complexity(complexity);
     }
-    let r = e.set_complexity(complexity);
-    if r < 0 {
-        return r;
+    if r >= 0 {
+        r = e.set_dtx(dtx);
     }
-    e.set_dtx(dtx)
+    // Leave the encoder unusable unless every setting was accepted.
+    if r >= 0 {
+        unsafe { *addr_of_mut!(INITIALISED) = true };
+    }
+    r
 }
 
 #[unsafe(no_mangle)]
@@ -87,11 +96,17 @@ pub extern "C" fn minisilk_output_ptr() -> *const u8 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn minisilk_encode() -> i32 {
+    if !initialised() {
+        return -1; /* OPUS_BAD_ARG: not initialised */
+    }
     unsafe { enc().encode_float(&*addr_of_mut!(INPUT_F32), &mut *addr_of_mut!(OUTPUT)) }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn minisilk_encode_i16() -> i32 {
+    if !initialised() {
+        return -1; /* OPUS_BAD_ARG: not initialised */
+    }
     unsafe { enc().encode(&*addr_of_mut!(INPUT_I16), &mut *addr_of_mut!(OUTPUT)) }
 }
 

@@ -24,7 +24,7 @@ fn PROMOTE_HIGH_F32X4(x: v128) -> v128 {
 /// inner product of two silk_float arrays, with result as double
 pub fn silk_inner_product_FLP(data1: &[f32], data2: &[f32], dataSize: i32) -> f64 {
     let n = dataSize.max(0) as usize;
-    assert!(data1.len() >= n && data2.len() >= n);
+    debug_assert!(data1.len() >= n && data2.len() >= n);
     let (p1, p2) = (data1.as_ptr(), data2.as_ptr());
     // SAFETY: every vector load below reads 4 floats at an index i with i + 4 <= n.
     unsafe {

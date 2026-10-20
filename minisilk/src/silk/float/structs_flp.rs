@@ -1,6 +1,5 @@
 //! Port of silk/float/structs_FLP.h.
 
-#![allow(non_camel_case_types, non_snake_case)]
 
 use crate::silk::define::*;
 use crate::silk::structs::*;

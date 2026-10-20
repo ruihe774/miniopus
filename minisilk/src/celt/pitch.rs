@@ -40,7 +40,7 @@ fn wasm_f32x4_hsum(a: v128) -> f32 {
 
 pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
     let n = N.max(0) as usize;
-    assert!(x.len() >= n && y.len() >= n);
+    debug_assert!(x.len() >= n && y.len() >= n);
     let (px, py) = (x.as_ptr(), y.as_ptr());
     // SAFETY: every vector load reads 4 floats at an index i with i + 4 <= n.
     unsafe {
@@ -68,6 +68,9 @@ pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
 /* Returns {sum_j x[j]*y[j+k], k=0..3}. Reads y[0..len+2]. */
 #[inline(always)]
 unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
+    // SAFETY: the caller guarantees x[0..len] and y[0..len + 3] are readable. The vector loop
+    // loads x[j..j + 4] and y[j + k..j + k + 4] (k <= 3) with j + 3 < len, so the last element is
+    // y[len + 2]; the tail loop loads x[j] and y[j..j + 4] with j < len, the same bound.
     unsafe {
         let mut sum0 = f32x4_splat(0.0);
         let mut sum1 = sum0;
@@ -97,8 +100,8 @@ unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
 pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max_pitch: i32) {
     debug_assert!(max_pitch > 0);
     let (len, max_pitch) = (len.max(0) as usize, max_pitch.max(0) as usize);
-    assert!(_x.len() >= len && xcorr.len() >= max_pitch);
-    assert!(_y.len() + 1 >= len + max_pitch);
+    debug_assert!(_x.len() >= len && xcorr.len() >= max_pitch);
+    debug_assert!(_y.len() + 1 >= len + max_pitch);
     let (px, py, po) = (_x.as_ptr(), _y.as_ptr(), xcorr.as_mut_ptr());
     // SAFETY: the C kernel's accesses stay within _x[0..len], _y[0..len+max_pitch-1] and
     // xcorr[0..max_pitch]; checked by the asserts above.

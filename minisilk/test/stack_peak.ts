@@ -2,7 +2,7 @@
 // (the Rust call stack, which lives at the bottom of linear memory and grows down from address
 // STACK_TOP) over worst-case configurations.
 //
-//   MINISILK_STACK_SIZE=1048576 cargo build --release -p minisilk-wasm --target wasm32-unknown-unknown --features stack-peak \
+//   MINISILK_SHADOW_STACK=1048576 cargo build --release -p minisilk-wasm --target wasm32-unknown-unknown --features stack-peak \
 //     --config 'target.wasm32-unknown-unknown.rustflags=["-Ctarget-feature=+simd128"]' --target-dir target/stack-peak
 //   deno run --allow-read minisilk/test/stack_peak.ts target/stack-peak/wasm32-unknown-unknown/release/minisilk_wasm.wasm [more.wasm ...]
 //
@@ -15,7 +15,7 @@
 
 const root = new URL('../..', import.meta.url).pathname;
 const FRAME = 320;
-const STACK_TOP = 1 << 20; // shadow stack size of the measuring build (MINISILK_STACK_SIZE=1048576)
+const STACK_TOP = 1 << 20; // shadow stack size of the measuring build (MINISILK_SHADOW_STACK=1048576)
 
 let seed = 12345;
 const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };

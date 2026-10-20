@@ -8,9 +8,8 @@ description = "wasm32-unknown-unknown cdylib exposing the minisilk encoder"
 [lib]
 crate-type = ["cdylib"]
 
-[features]
-# Adds the `minisilk_stack_peak` export (see minisilk/PORTING.md, "Pseudostack size").
-stack-peak = ["minisilk/stack-peak"]
-
 [dependencies]
 minisilk = { path = ".." }
+
+[features]
+stack-peak = ["minisilk/stack-peak"]

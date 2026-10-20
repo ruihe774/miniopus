@@ -13,7 +13,6 @@
 //! - Type-generic C macros (`silk_min`, `silk_max`, `silk_LIMIT`, `silk_abs`, `silk_sign`) are
 //!   `macro_rules!` macros; everything else is an `#[inline(always)]` function.
 
-#![allow(non_snake_case, dead_code)]
 
 pub const silk_int32_MAX: i32 = i32::MAX;
 pub const silk_int32_MIN: i32 = i32::MIN;

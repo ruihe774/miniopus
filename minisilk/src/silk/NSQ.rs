@@ -69,6 +69,12 @@ unsafe fn silk_nsq_scale_states_wasm(
     pitchL: &[i32],           /* I    Pitch lag                       */
     signal_type: i32,         /* I    Signal type                     */
 ) {
+    // SAFETY: the x16 / x_sc_Q10 pointers come from slices cut to `subfr_length`, and the vector
+    // loops run while i < subfr_length - 3 (4 lanes in range). The sLTP / sLTP_Q15 / sLTP_shp_Q14
+    // loops cover [start, buf_idx) with start >= 0 and buf_idx within the buffer length (the
+    // debug_asserts below), again in steps of 4 only while i < buf_idx - 3. The sLPC_Q14 (16
+    // entries scaled) and sAR2_Q14 (24) loops have bounds that are multiples of 4 and lie within
+    // the arrays (sLPC_Q14 holds MAX_SUB_FRAME_LENGTH + NSQ_LPC_BUF_LENGTH entries).
     unsafe {
         let mut i: i32;
         let mut g: v128;
@@ -191,6 +197,13 @@ unsafe fn silk_noise_shape_quantizer_wasm<const AR_VECS: usize>(
     shapingLPCOrder: i32,        /* I    Noise shaping AR filter order   */
     predictLPCOrder: i32,        /* I    Prediction filter order         */
 ) {
+    // SAFETY: the caller passes `pulses` with `length` writable entries, and the debug_asserts
+    // below state the buffer bounds: xq_off + length <= xq.len(); sLTP_buf_idx + length <=
+    // sLTP_Q15.len(); sLTP_shp_buf_idx + length <= sLTP_shp_Q14.len(); the lag pointers start at
+    // non-negative offsets (for lag > 0 / voiced). The 4-lane loads of `coef` (24 entries), sAR2_Q14
+    // (24) and sLPC_Q14 (96 = 16 history + 80 samples, read at most up to index 16 + length) stay
+    // within their arrays; the LPC history loads read psLPC_Q14[-15 ..= 0], which is inside the
+    // first NSQ_LPC_BUF_LENGTH entries. The final xq stores write xq[0..length] in 8/1-lane steps.
     unsafe {
         let mut LTP_pred_Q13: i32;
         let mut LPC_pred_Q10: i32;
@@ -526,6 +539,10 @@ pub unsafe fn silk_NSQ(
     Lambda_Q10: i32,                   /* I    Rate/distortion tradeoff        */
     LTP_scale_Q14: i32,                /* I    LTP state scaling               */
 ) {
+    // SAFETY: `psEncC`, `NSQ` and `psIndices` are valid (see above) and `pulses` has frame_length
+    // entries: it is advanced by subfr_length once per subframe, nb_subfr times. The scratch
+    // buffers hold (ltp_mem_length + frame_length) entries, which bounds the sLTP indices used by
+    // the kernels called below.
     unsafe {
         let subfr_length = MAX_SUB_FRAME_LENGTH;
         let ltp_mem_length = LTP_MEM_LENGTH;

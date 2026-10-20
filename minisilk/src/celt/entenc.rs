@@ -1,6 +1,5 @@
 //! Port of celt/entenc.c (with the constants of celt/mfrngcod.h).
 
-#![allow(non_camel_case_types)]
 
 use crate::celt::entcode::*;
 
