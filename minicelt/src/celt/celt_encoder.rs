@@ -417,9 +417,7 @@ pub fn l1_metric(tmp: &[f32], N: i32, lm: i32, bias: f32) -> f32 {
 
 /// `X` holds the channels of normalized spectrum (`N0` coefficients each); `tf_res[0..len]` and
 /// `importance[0..len]` are indexed by band. Returns `tf_select`.
-// IX-HARD: `X.rg(off..)` (offset from the band edges) and `tf_select_table.at(4 * isTransient + k)` (index
-// computed from coded values). The band-level `metric`/`importance`/`path0`/`path1`/`tf_res` loops over
-// `lenu` (a re-slice to `lenu` would do) are left on `Ix` too; not measured.
+#[inline(never)]
 pub fn tf_analysis(
     len: i32,
     isTransient: i32,
@@ -437,27 +435,32 @@ pub fn tf_analysis(
     let bias: f32 = 0.04 * MAX16(-0.25, 0.5 - tf_estimate);
 
     let lenu = len as usize;
-    let eb = modes::eBands;
-    let nlast = ((eb.at(lenu) as i32 - eb.at(lenu - 1) as i32) << LM) as usize;
+    let eb = &modes::eBands[..lenu + 1];
+    let nlast = ((eb[lenu] as i32 - eb[lenu - 1] as i32) << LM) as usize;
     let metric = sg.alloc::<i32>(lenu);
     let tmp = sg.alloc::<f32>(nlast);
     let tmp_1 = sg.alloc::<f32>(nlast);
     let path0 = sg.alloc::<i32>(lenu);
     let path1 = sg.alloc::<i32>(lenu);
+    let importance = &importance[..lenu];
+    let tf_res = &mut tf_res[..lenu];
+    let X = &X[(tf_chan * N0) as usize..];
 
-    for i in 0..lenu {
+    for (m, e) in metric.iter_mut().zip(eb.windows(2)) {
         let mut best_level: i32 = 0;
-        let N = (eb.at(i + 1) as i32 - eb.at(i) as i32) << LM;
+        let N = (e[1] as i32 - e[0] as i32) << LM;
+        let Nu = N as usize;
         /* band is too narrow to be split down to LM=-1 */
-        let narrow = (eb.at(i + 1) as i32 - eb.at(i) as i32) == 1;
-        let off = (tf_chan * N0 + ((eb.at(i) as i32) << LM)) as usize;
-        tmp.rg_mut(..N as usize).copy_from_slice(X.rg(off..off + N as usize));
+        let narrow = (e[1] as i32 - e[0] as i32) == 1;
+        let off = (e[0] as usize) << LM;
+        let tmp = &mut tmp[..Nu];
+        tmp.copy_from_slice(&X[off..off + Nu]);
         /* Just add the right channel if we're in stereo */
         let mut L1 = l1_metric(tmp, N, if isTransient != 0 { LM } else { 0 }, bias);
         let mut best_L1 = L1;
         /* Check the -1 case for transients */
         if isTransient != 0 && !narrow {
-            tmp_1.rg_mut(..N as usize).copy_from_slice(tmp.rg(..N as usize));
+            tmp_1[..Nu].copy_from_slice(tmp);
             haar1(tmp_1, N >> LM, 1 << LM);
             L1 = l1_metric(tmp_1, N, LM + 1, bias);
             if L1 < best_L1 {
@@ -485,43 +488,46 @@ pub fn tf_analysis(
         }
         /* metric is in Q1 to be able to select the mid-point (-0.5) for narrower bands */
         if isTransient != 0 {
-            *metric.at_mut(i) = 2 * best_level;
+            *m = 2 * best_level;
         } else {
-            *metric.at_mut(i) = -2 * best_level;
+            *m = -2 * best_level;
         }
         /* For bands that can't be split to -1, set the metric to the half-way point to avoid
         biasing the decision */
-        if narrow && (metric.at(i) == 0 || metric.at(i) == -2 * LM) {
-            *metric.at_mut(i) -= 1;
+        if narrow && (*m == 0 || *m == -2 * LM) {
+            *m -= 1;
         }
     }
     /* 2*tf_select_table[LM][4*isTransient+k] */
-    let tfs = |k: i32| -> i32 { 2 * tf_select_table.at((4 * isTransient + k) as usize) as i32 };
+    let tfs: [i32; 4] = {
+        let t = &tf_select_table[4 * (isTransient & 1) as usize..][..4];
+        [2 * t[0] as i32, 2 * t[1] as i32, 2 * t[2] as i32, 2 * t[3] as i32]
+    };
     /* Search for the optimal tf resolution, including tf_select */
     tf_select = 0;
-    for sel in 0..2 {
-        let mut cost0 = importance.at(0) * (metric.at(0) - tfs(2 * sel + 0)).abs();
-        let mut cost1 =
-            importance.at(0) * (metric.at(0) - tfs(2 * sel + 1)).abs() + if isTransient != 0 { 0 } else { lambda };
-        for i in 1..lenu {
+    for (sel, sc) in selcost.iter_mut().enumerate() {
+        let (t0, t1) = (tfs[2 * sel], tfs[2 * sel + 1]);
+        let mut cost0 = importance[0] * (metric[0] - t0).abs();
+        let mut cost1 = importance[0] * (metric[0] - t1).abs() + if isTransient != 0 { 0 } else { lambda };
+        for (&imp, &m) in importance[1..].iter().zip(&metric[1..]) {
             let curr0 = IMIN(cost0, cost1 + lambda);
             let curr1 = IMIN(cost0 + lambda, cost1);
-            cost0 = curr0 + importance.at(i) * (metric.at(i) - tfs(2 * sel + 0)).abs();
-            cost1 = curr1 + importance.at(i) * (metric.at(i) - tfs(2 * sel + 1)).abs();
+            cost0 = curr0 + imp * (m - t0).abs();
+            cost1 = curr1 + imp * (m - t1).abs();
         }
-        cost0 = IMIN(cost0, cost1);
-        *selcost.at_mut(sel as usize) = cost0;
+        *sc = IMIN(cost0, cost1);
     }
     /* For now, we're conservative and only allow tf_select=1 for transients.
      * If tests confirm it's useful for non-transients, we could allow it. */
-    if selcost.at(1) < selcost.at(0) && isTransient != 0 {
+    if selcost[1] < selcost[0] && isTransient != 0 {
         tf_select = 1;
     }
-    let mut cost0 = importance.at(0) * (metric.at(0) - tfs(2 * tf_select + 0)).abs();
-    let mut cost1 =
-        importance.at(0) * (metric.at(0) - tfs(2 * tf_select + 1)).abs() + if isTransient != 0 { 0 } else { lambda };
+    let (t0, t1) = (tfs[2 * tf_select as usize], tfs[2 * tf_select as usize + 1]);
+    let mut cost0 = importance[0] * (metric[0] - t0).abs();
+    let mut cost1 = importance[0] * (metric[0] - t1).abs() + if isTransient != 0 { 0 } else { lambda };
     /* Viterbi forward pass */
     for i in 1..lenu {
+        let (imp, m) = (importance[i], metric[i]);
         let curr0: i32;
         let curr1: i32;
 
@@ -529,32 +535,30 @@ pub fn tf_analysis(
         let from1 = cost1 + lambda;
         if from0 < from1 {
             curr0 = from0;
-            *path0.at_mut(i) = 0;
+            path0[i] = 0;
         } else {
             curr0 = from1;
-            *path0.at_mut(i) = 1;
+            path0[i] = 1;
         }
 
         let from0 = cost0 + lambda;
         let from1 = cost1;
         if from0 < from1 {
             curr1 = from0;
-            *path1.at_mut(i) = 0;
+            path1[i] = 0;
         } else {
             curr1 = from1;
-            *path1.at_mut(i) = 1;
+            path1[i] = 1;
         }
-        cost0 = curr0 + importance.at(i) * (metric.at(i) - tfs(2 * tf_select + 0)).abs();
-        cost1 = curr1 + importance.at(i) * (metric.at(i) - tfs(2 * tf_select + 1)).abs();
+        cost0 = curr0 + imp * (m - t0).abs();
+        cost1 = curr1 + imp * (m - t1).abs();
     }
-    *tf_res.at_mut(lenu - 1) = if cost0 < cost1 { 0 } else { 1 };
+    let mut next = if cost0 < cost1 { 0 } else { 1 };
+    tf_res[lenu - 1] = next;
     /* Viterbi backward pass to check the decisions */
     for i in (0..lenu - 1).rev() {
-        if tf_res.at(i + 1) == 1 {
-            *tf_res.at_mut(i) = path1.at(i + 1);
-        } else {
-            *tf_res.at_mut(i) = path0.at(i + 1);
-        }
+        next = if next == 1 { path1[i + 1] } else { path0[i + 1] };
+        tf_res[i] = next;
     }
     tf_select
 }
