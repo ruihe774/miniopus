@@ -1,6 +1,5 @@
 //! Port of celt/celt.h and the encoder-side parts of celt/celt.c.
 
-use super::arch::Ix;
 use super::arch::{COEF_ONE, IMAX};
 use super::modes;
 use super::pitch::comb_filter_const;
@@ -29,7 +28,6 @@ static gains: [[f32; 3]; 3] = [
 /// # Safety
 /// `x` must have `max(T0,T1,15)+2` readable floats before it and `N` after it; `y` must have
 /// `N` writable floats. `y == x` (in place) is allowed; the regions otherwise must not overlap.
-// IX-HARD: `gains.at(tapset).at(k)`: `tapset` is the coded tapset, not bounded by a type.
 pub unsafe fn comb_filter(
     y: *mut f32,
     x: *const f32,
@@ -53,12 +51,10 @@ pub unsafe fn comb_filter(
         to have then be at least 2 to avoid processing garbage data. */
         T0 = IMAX(T0, COMBFILTER_MINPERIOD);
         T1 = IMAX(T1, COMBFILTER_MINPERIOD);
-        let g00 = g0 * gains.at(tapset0 as usize).at(0);
-        let g01 = g0 * gains.at(tapset0 as usize).at(1);
-        let g02 = g0 * gains.at(tapset0 as usize).at(2);
-        let g10 = g1 * gains.at(tapset1 as usize).at(0);
-        let g11 = g1 * gains.at(tapset1 as usize).at(1);
-        let g12 = g1 * gains.at(tapset1 as usize).at(2);
+        let [t00, t01, t02] = gains[tapset0 as usize];
+        let [t10, t11, t12] = gains[tapset1 as usize];
+        let (g00, g01, g02) = (g0 * t00, g0 * t01, g0 * t02);
+        let (g10, g11, g12) = (g1 * t10, g1 * t11, g1 * t12);
         let (t0, t1) = (T0 as isize, T1 as isize);
         let mut x1 = *x.offset(-t1 + 1);
         let mut x2 = *x.offset(-t1);

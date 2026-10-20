@@ -8,7 +8,6 @@
 //! ENABLE_QEXT, so `prev == 0`); `quant_energy_finalise` loses the `oldEBands != NULL` check
 //! (always non-NULL outside ENABLE_QEXT).
 
-use super::arch::Ix;
 use super::arch::{IMAX, IMIN, MAX32, MIN32};
 use super::entcode::{ec_enc, ec_get_buffer, ec_range_bytes, ec_tell, ec_tell_frac};
 use super::entenc::{ec_enc_bit_logp, ec_enc_bits, ec_enc_icdf};
@@ -53,21 +52,20 @@ pub static e_prob_model: [[u8; 42]; 2] = [
 
 pub static small_energy_icdf: [u8; 3] = [2, 1, 0];
 
-// IX-HARD: `eBands`/`oldEBands` are caller-sized slices; re-slicing per channel only moves the check (measured).
 pub fn loss_distortion(eBands: &[f32], oldEBands: &[f32], start: i32, end: i32, len: i32, C: i32) -> f32 {
     let mut dist: f32 = 0.0;
     for c in 0..C {
-        for i in start..end {
-            let k = (i + c * len) as usize;
-            let d = eBands.at(k) - oldEBands.at(k);
+        let base = (c * len) as usize;
+        let e = &eBands[base + start as usize..base + end as usize];
+        let o = &oldEBands[base + start as usize..base + end as usize];
+        for (&x, &y) in e.iter().zip(o) {
+            let d = x - y;
             dist = dist + d * d;
         }
     }
     MIN32(200.0, dist)
 }
 
-// IX-HARD: `eBands`/`oldEBands`/`error` at `i + c * nbEBands`: caller-sized slices, and the i-outer, c-inner
-// order is fixed by the coder calls in between, so there is no per-channel slice to iterate.
 fn quant_coarse_energy_impl(
     end: i32,
     eBands: &[f32],
@@ -103,12 +101,12 @@ fn quant_coarse_energy_impl(
         let mut c = 0;
         loop {
             let k = (i + c * modes::nbEBands) as usize;
-            let x = eBands.at(k);
-            let oldE = MAX32(-9.0, oldEBands.at(k));
+            let x = eBands[k];
+            let oldE = MAX32(-9.0, oldEBands[k]);
             let f = x - coef * oldE - prev[c as usize & 1];
             /* Rounding to nearest integer here is really important! */
             let mut qi = crate::celt::arch::floor64((0.5f32 + f) as f64) as i32;
-            let decay_bound = MAX32(-28.0, oldEBands.at(k)) - max_decay;
+            let decay_bound = MAX32(-28.0, oldEBands[k]) - max_decay;
             /* Prevent the energy from going down too quickly (e.g. for bands
             that have just one bin) */
             if qi < 0 && x < decay_bound {
@@ -142,12 +140,12 @@ fn quant_coarse_energy_impl(
             } else {
                 qi = -1;
             }
-            *error.at_mut(k) = f - qi as f32;
+            error[k] = f - qi as f32;
             badness += (qi0 - qi).abs();
             let q = qi as f32;
 
             let tmp = coef * oldE + prev[c as usize & 1] + q;
-            *oldEBands.at_mut(k) = tmp;
+            oldEBands[k] = tmp;
             prev[c as usize & 1] = prev[c as usize & 1] + q - beta * q;
             c += 1;
             if c >= C {
@@ -158,7 +156,6 @@ fn quant_coarse_energy_impl(
     badness
 }
 
-// IX-HARD: `rg(..nb)` copies between caller-sized arrays (`C * nbEBands` elements), no length to prove it against.
 pub fn quant_coarse_energy(
     end: i32,
     eBands: &[f32],
@@ -197,7 +194,7 @@ pub fn quant_coarse_energy(
     let nb = (C * modes::nbEBands) as usize;
     let oldEBands_intra = sg.alloc::<f32>(nb);
     let error_intra = sg.alloc::<f32>(nb);
-    oldEBands_intra.copy_from_slice(oldEBands.rg(..nb));
+    oldEBands_intra.copy_from_slice(&oldEBands[..nb]);
 
     if two_pass != 0 || intra != 0 {
         badness1 = quant_coarse_energy_impl(
@@ -235,13 +232,13 @@ pub fn quant_coarse_energy(
             *enc = enc_intra_state;
             /* Copy intra bits to bit-stream */
             unsafe { core::ptr::copy_nonoverlapping(intra_bits.as_ptr(), intra_buf, save_bytes as usize) };
-            oldEBands.rg_mut(..nb).copy_from_slice(oldEBands_intra);
-            error.rg_mut(..nb).copy_from_slice(error_intra);
+            oldEBands[..nb].copy_from_slice(oldEBands_intra);
+            error[..nb].copy_from_slice(error_intra);
             intra = 1;
         }
     } else {
-        oldEBands.rg_mut(..nb).copy_from_slice(oldEBands_intra);
-        error.rg_mut(..nb).copy_from_slice(error_intra);
+        oldEBands[..nb].copy_from_slice(oldEBands_intra);
+        error[..nb].copy_from_slice(error_intra);
     }
 
     if intra != 0 {
@@ -251,8 +248,6 @@ pub fn quant_coarse_energy(
     }
 }
 
-// IX-HARD: `extra_quant`/`error`/`oldEBands` are caller-sized slices indexed `i` and `i + c * nbEBands` in an
-// i-outer, c-inner loop interleaved with coder calls; re-slicing to `end` only moves the check (measured).
 pub fn quant_fine_energy(
     end: i32,
     oldEBands: &mut [f32],
@@ -265,8 +260,9 @@ pub fn quant_fine_energy(
     let prev: i32 = 0;
     let start = 0;
     /* Encode finer resolution */
+    let extra_quant = &extra_quant[..end as usize];
     for i in start..end {
-        let eq = extra_quant.at(i as usize);
+        let eq = extra_quant[i as usize];
         if eq <= 0 {
             continue;
         }
@@ -276,7 +272,7 @@ pub fn quant_fine_energy(
         }
         for c in 0..C {
             let k = (i + c * modes::nbEBands) as usize;
-            let mut q2 = crate::celt::arch::floor64(((error.at(k) * (1 << prev) as f32 + 0.5f32) * extra as f32) as f64) as i32;
+            let mut q2 = crate::celt::arch::floor64(((error[k] * (1 << prev) as f32 + 0.5f32) * extra as f32) as f64) as i32;
             if q2 > extra - 1 {
                 q2 = extra - 1;
             }
@@ -286,14 +282,12 @@ pub fn quant_fine_energy(
             ec_enc_bits(enc, q2 as u32, eq as u32);
             let mut offset: f32 = (q2 as f32 + 0.5f32) * (1 << (14 - eq)) as f32 * (1.0f32 / 16384.0) - 0.5f32;
             offset *= (1 << (14 - prev)) as f32 * (1.0f32 / 16384.0);
-            *oldEBands.at_mut(k) += offset;
-            *error.at_mut(k) -= offset;
+            oldEBands[k] += offset;
+            error[k] -= offset;
         }
     }
 }
 
-// IX-HARD: `fine_quant`/`fine_priority`/`error`/`oldEBands` are caller-sized slices indexed `i` and
-// `i + c * nbEBands` in an i-outer, c-inner loop interleaved with coder calls; re-slicing only moves the check (measured).
 pub fn quant_energy_finalise(
     end: i32,
     oldEBands: &mut [f32],
@@ -305,21 +299,23 @@ pub fn quant_energy_finalise(
     C: i32,
 ) {
     let start = 0;
+    let fine_quant = &fine_quant[..end as usize];
+    let fine_priority = &fine_priority[..end as usize];
     /* Use up the remaining bits */
     for prio in 0..2 {
         let mut i = start;
         while i < end && bits_left >= C {
-            if fine_quant.at(i as usize) >= MAX_FINE_BITS || fine_priority.at(i as usize) != prio {
+            if fine_quant[i as usize] >= MAX_FINE_BITS || fine_priority[i as usize] != prio {
                 i += 1;
                 continue;
             }
             for c in 0..C {
                 let k = (i + c * modes::nbEBands) as usize;
-                let q2: i32 = if error.at(k) < 0.0 { 0 } else { 1 };
+                let q2: i32 = if error[k] < 0.0 { 0 } else { 1 };
                 ec_enc_bits(enc, q2 as u32, 1);
-                let offset: f32 = (q2 as f32 - 0.5f32) * (1 << (14 - fine_quant.at(i as usize) - 1)) as f32 * (1.0f32 / 16384.0);
-                *oldEBands.at_mut(k) += offset;
-                *error.at_mut(k) -= offset;
+                let offset: f32 = (q2 as f32 - 0.5f32) * (1 << (14 - fine_quant[i as usize] - 1)) as f32 * (1.0f32 / 16384.0);
+                oldEBands[k] += offset;
+                error[k] -= offset;
                 bits_left -= 1;
             }
             i += 1;
@@ -328,12 +324,13 @@ pub fn quant_energy_finalise(
 }
 
 /// (`effEnd == end` here, so the `-14` fill of the bands above effEnd never happens)
-// IX-HARD: `bandE`/`bandLogE` are caller-sized slices; per-channel re-slicing only moves the check (measured).
 pub fn amp2Log2(end: i32, bandE: &[f32], bandLogE: &mut [f32], C: i32) {
     for c in 0..C {
-        for i in 0..end {
-            *bandLogE.at_mut((i + c * modes::nbEBands) as usize) =
-                celt_log2_db(bandE.at((i + c * modes::nbEBands) as usize)) - eMeans.at(i as usize);
+        let base = (c * modes::nbEBands) as usize;
+        let out = &mut bandLogE[base..base + end as usize];
+        let e = &bandE[base..base + end as usize];
+        for ((o, &b), &mean) in out.iter_mut().zip(e).zip(&eMeans[..end as usize]) {
+            *o = celt_log2_db(b) - mean;
         }
     }
 }
