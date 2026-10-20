@@ -298,30 +298,38 @@ static ordery_table: [i32; 30] = [
     15, 0, 8, 7, 12, 3, 11, 4, 14, 1, 9, 6, 13, 2, 10, 5,
 ];
 
-// IX-HARD: `ordery_table.rg(stride - 2..)` (`stride` from the caller). The strided `X`/`tmp` accesses
-// (`j * stride + i < N`) have the shape of `haar1`, whose `chunks_exact_mut` form cost +1.0% encode time
-// (`haar1` is IX-HARD for that), so they are not converted.
+/// Inverse permutations of the `ordery_table` lines: `ordery_inv[s - 2 + ordery_table[s - 2 + i]] == i`.
+static ordery_inv: [u8; 30] = {
+    let mut inv = [0u8; 30];
+    let mut s = 2;
+    while s <= 16 {
+        let mut i = 0;
+        while i < s {
+            inv[s - 2 + ordery_table[s - 2 + i] as usize] = i as u8;
+            i += 1;
+        }
+        s *= 2;
+    }
+    inv
+};
+
 fn deinterleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
     let tmp = st.alloc::<f32>(N);
     debug_assert!(stride > 0);
     let (N0, stride) = (N0 as usize, stride as usize);
-    if hadamard != 0 {
-        let ordery = ordery_table.rg(stride - 2..);
-        for i in 0..stride {
-            for j in 0..N0 {
-                *tmp.at_mut(ordery.at(i) as usize * N0 + j) = X.at(j * stride + i);
-            }
-        }
-    } else {
-        for i in 0..stride {
-            for j in 0..N0 {
-                *tmp.at_mut(i * N0 + j) = X.at(j * stride + i);
-            }
+    let X = &mut X[..N];
+    let inv: &[u8] = if hadamard != 0 { &ordery_inv[stride - 2..][..stride] } else { &[] };
+    /* row r of tmp is column inv[r] (or r) of X, whose rows have length stride */
+    let rows = X.chunks_exact(stride);
+    for (r, out) in tmp.chunks_exact_mut(N0).enumerate() {
+        let i = if hadamard != 0 { inv[r] as usize } else { r };
+        for (t, x) in out.iter_mut().zip(rows.clone()) {
+            *t = x[i];
         }
     }
-    X.rg_mut(..N).copy_from_slice(tmp);
+    X.copy_from_slice(tmp);
 }
 
 // IX-HARD: `ordery_table.rg(stride - 2..)` (`stride` from the caller). The strided `X`/`tmp` accesses
