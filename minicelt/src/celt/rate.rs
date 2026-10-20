@@ -66,7 +66,6 @@ fn eb(i: i32) -> i32 {
     modes::eBands[i as usize] as i32
 }
 
-// IX-HARD: `LOG2_FRAC_TABLE.at(j - start)`, `modes::logN.at(ju)`, `eb(..)`: indexed by band counters with no length to prove them against.
 fn interp_bits2pulses(
     end: i32, skip_start: i32, bits1: &[i32], bits2: &[i32], thresh: &[i32],
     cap: &[i32], mut total: i32, _balance: &mut i32, skip_rsv: i32, intensity: &mut i32,
@@ -79,6 +78,8 @@ fn interp_bits2pulses(
     let eu = end as usize;
     let (bits1, bits2, thresh, cap) = (&bits1[..eu], &bits2[..eu], &thresh[..eu], &cap[..eu]);
     let (bits, ebits, fine_priority) = (&mut bits[..eu], &mut ebits[..eu], &mut fine_priority[..eu]);
+    /* indexed by the same band counters as `bits` */
+    let (log2_frac, logN) = (&LOG2_FRAC_TABLE[..eu], &modes::logN[..eu]);
     let mut psum: i32;
     let mut lo: i32;
     let mut hi: i32;
@@ -192,7 +193,7 @@ fn interp_bits2pulses(
         /*Reclaim the bits originally allocated to this band.*/
         psum -= bits[ju] + intensity_rsv;
         if intensity_rsv > 0 {
-            intensity_rsv = LOG2_FRAC_TABLE.at((j - start) as usize) as i32;
+            intensity_rsv = log2_frac[(j - start) as usize] as i32;
         }
         psum += intensity_rsv;
         if band_bits >= alloc_floor {
@@ -259,7 +260,7 @@ fn interp_bits2pulses(
             /* Compensate for the extra DoF in stereo */
             let den = C * N + if C == 2 && N > 2 && *dual_stereo == 0 && j < *intensity { 1 } else { 0 };
 
-            let NClogN = den * (modes::logN.at(ju) as i32 + logM);
+            let NClogN = den * (logN[ju] as i32 + logM);
 
             /* Offset for the number of fine bits by log2(N)/2 + FINE_OFFSET
                compared to their "fair share" of total/N */
