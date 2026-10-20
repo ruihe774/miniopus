@@ -29,8 +29,7 @@ static gains: [[f32; 3]; 3] = [
 /// # Safety
 /// `x` must have `max(T0,T1,15)+2` readable floats before it and `N` after it; `y` must have
 /// `N` writable floats. `y == x` (in place) is allowed; the regions otherwise must not overlap.
-// IX-MIXED: `window.at(i)` over `0..overlap` is EASY; `gains.at(tapset).at(k)` (`tapset` is the coded
-// tapset, not bounded by a type) is HARD.
+// IX-HARD: `gains.at(tapset).at(k)`: `tapset` is the coded tapset, not bounded by a type.
 pub unsafe fn comb_filter(
     y: *mut f32,
     x: *const f32,
@@ -71,7 +70,8 @@ pub unsafe fn comb_filter(
         let mut i: isize = 0;
         while i < overlap as isize {
             let x0 = *x.offset(i - t1 + 2);
-            let f: f32 = window.at(i as usize) * window.at(i as usize);
+            let w = window[i as usize];
+            let f: f32 = w * w;
             *y.offset(i) = *x.offset(i)
                 + ((COEF_ONE - f) * g00) * *x.offset(i - t0)
                 + ((COEF_ONE - f) * g01) * (*x.offset(i - t0 + 1) + *x.offset(i - t0 - 1))
@@ -103,11 +103,12 @@ pub unsafe fn comb_filter(
 pub static tf_select_table: [i8; 8] = [0, -2, 0, -3, 3, 0, 1, -1];
 
 /// init_caps for LM == 3; `cache_caps` only holds the rows of LM 3, indexed by `(C-1)*nbEBands + i`.
-// IX-EASY: `i < nbEBands`: `eBands.at(i + 1)`, `cap.at_mut(i)` and `cache_caps.at((C - 1) * nbEBands + i)`
-// are all constant-bounded; re-slice `cap` and take `C` as 1 or 2.
 pub fn init_caps(cap: &mut [i32], C: i32) {
-    for i in 0..modes::nbEBands {
-        let N = (modes::eBands.at(i as usize + 1) as i32 - modes::eBands.at(i as usize) as i32) << 3;
-        *cap.at_mut(i as usize) = (modes::cache_caps.at(((C - 1) * modes::nbEBands + i) as usize) as i32 + 64) * C * N >> 2;
+    const NB: usize = modes::nbEBands as usize;
+    // C is 1 or 2: the mask only tells the compiler that the row is in range.
+    let row = &modes::cache_caps[((C - 1) as usize & 1) * NB..][..NB];
+    for (i, (cap, &cc)) in cap[..NB].iter_mut().zip(row).enumerate() {
+        let N = (modes::eBands[i + 1] as i32 - modes::eBands[i] as i32) << 3;
+        *cap = (cc as i32 + 64) * C * N >> 2;
     }
 }

@@ -53,7 +53,7 @@ pub static e_prob_model: [[u8; 42]; 2] = [
 
 pub static small_energy_icdf: [u8; 3] = [2, 1, 0];
 
-// IX-EASY: one loop over `start..end`; re-slice both arrays to `end`.
+// IX-HARD: `eBands`/`oldEBands` are caller-sized slices; re-slicing per channel only moves the check (measured).
 pub fn loss_distortion(eBands: &[f32], oldEBands: &[f32], start: i32, end: i32, len: i32, C: i32) -> f32 {
     let mut dist: f32 = 0.0;
     for c in 0..C {
@@ -66,8 +66,8 @@ pub fn loss_distortion(eBands: &[f32], oldEBands: &[f32], start: i32, end: i32, 
     MIN32(200.0, dist)
 }
 
-// IX-MIXED: `eBands`/`oldEBands`/`error` at `k` and `prev.at(c)` (`c < 2`) are EASY; `prob_model.at(pi)`
-// (`pi = 2 * min(i, 20)`, a 42-element table) is provable with a `min` but not yet written that way.
+// IX-HARD: `eBands`/`oldEBands`/`error` at `i + c * nbEBands`: caller-sized slices, and the i-outer, c-inner
+// order is fixed by the coder calls in between, so there is no per-channel slice to iterate.
 fn quant_coarse_energy_impl(
     end: i32,
     eBands: &[f32],
@@ -105,7 +105,7 @@ fn quant_coarse_energy_impl(
             let k = (i + c * modes::nbEBands) as usize;
             let x = eBands.at(k);
             let oldE = MAX32(-9.0, oldEBands.at(k));
-            let f = x - coef * oldE - prev.at(c as usize);
+            let f = x - coef * oldE - prev[c as usize & 1];
             /* Rounding to nearest integer here is really important! */
             let mut qi = crate::celt::arch::floor64((0.5f32 + f) as f64) as i32;
             let decay_bound = MAX32(-28.0, oldEBands.at(k)) - max_decay;
@@ -131,8 +131,8 @@ fn quant_coarse_energy_impl(
                 }
             }
             if budget - tell >= 15 {
-                let pi = (2 * IMIN(i, 20)) as usize;
-                ec_laplace_encode(enc, &mut qi, (prob_model.at(pi) as u32) << 7, (prob_model.at(pi + 1) as i32) << 6);
+                let pi = 2 * (i as usize).min(20);
+                ec_laplace_encode(enc, &mut qi, (prob_model[pi] as u32) << 7, (prob_model[pi + 1] as i32) << 6);
             } else if budget - tell >= 2 {
                 qi = IMAX(-1, IMIN(qi, 1));
                 ec_enc_icdf(enc, (2 * qi) ^ -((qi < 0) as i32), &small_energy_icdf, 2);
@@ -146,9 +146,9 @@ fn quant_coarse_energy_impl(
             badness += (qi0 - qi).abs();
             let q = qi as f32;
 
-            let tmp = coef * oldE + prev.at(c as usize) + q;
+            let tmp = coef * oldE + prev[c as usize & 1] + q;
             *oldEBands.at_mut(k) = tmp;
-            *prev.at_mut(c as usize) = prev.at(c as usize) + q - beta * q;
+            prev[c as usize & 1] = prev[c as usize & 1] + q - beta * q;
             c += 1;
             if c >= C {
                 break;
@@ -158,7 +158,7 @@ fn quant_coarse_energy_impl(
     badness
 }
 
-// IX-EASY: `rg(..nb)` copies between arrays of `C * nb` elements.
+// IX-HARD: `rg(..nb)` copies between caller-sized arrays (`C * nbEBands` elements), no length to prove it against.
 pub fn quant_coarse_energy(
     end: i32,
     eBands: &[f32],
@@ -251,7 +251,8 @@ pub fn quant_coarse_energy(
     }
 }
 
-// IX-EASY: `extra_quant.at(i)` over `start..end` and `error`/`oldEBands` at `i + c * nb`; re-slice per channel.
+// IX-HARD: `extra_quant`/`error`/`oldEBands` are caller-sized slices indexed `i` and `i + c * nbEBands` in an
+// i-outer, c-inner loop interleaved with coder calls; re-slicing to `end` only moves the check (measured).
 pub fn quant_fine_energy(
     end: i32,
     oldEBands: &mut [f32],
@@ -291,7 +292,8 @@ pub fn quant_fine_energy(
     }
 }
 
-// IX-EASY: `fine_quant`/`fine_priority` at `i` over `start..end`, `error`/`oldEBands` at `i + c * nb`; re-slice.
+// IX-HARD: `fine_quant`/`fine_priority`/`error`/`oldEBands` are caller-sized slices indexed `i` and
+// `i + c * nbEBands` in an i-outer, c-inner loop interleaved with coder calls; re-slicing only moves the check (measured).
 pub fn quant_energy_finalise(
     end: i32,
     oldEBands: &mut [f32],
@@ -326,7 +328,7 @@ pub fn quant_energy_finalise(
 }
 
 /// (`effEnd == end` here, so the `-14` fill of the bands above effEnd never happens)
-// IX-EASY: `bandE`/`bandLogE` at `i + c * nbEBands`, `eMeans.at(i)` over `0..end`; re-slice.
+// IX-HARD: `bandE`/`bandLogE` are caller-sized slices; per-channel re-slicing only moves the check (measured).
 pub fn amp2Log2(end: i32, bandE: &[f32], bandLogE: &mut [f32], C: i32) {
     for c in 0..C {
         for i in 0..end {

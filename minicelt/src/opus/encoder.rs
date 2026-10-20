@@ -110,59 +110,57 @@ pub struct OpusEncoder {
 
 /// Float `dc_reject` (cutoff 3 Hz at 48 kHz), in place: one-pole high-pass, state in
 /// `hp_mem[0]` (and `hp_mem[2]` for stereo).
-// IX-EASY: `hp_mem` is a `[f32; 4]` with constant indices; `buf` loops via `chunks_exact_mut(2)` / `iter_mut`.
 fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
     let coef: f32 = 6.3f32 * 3.0f32 / FS as f32;
     let coef2: f32 = 1.0 - coef;
     if channels == 2 {
-        let mut m0 = hp_mem.at(0);
-        let mut m2 = hp_mem.at(2);
-        for i in 0..FRAME_SIZE as usize {
-            let x0 = buf.at(2 * i);
-            let x1 = buf.at(2 * i + 1);
+        let mut m0 = hp_mem[0];
+        let mut m2 = hp_mem[2];
+        for f in buf.rg_mut(..2 * FRAME_SIZE as usize).chunks_exact_mut(2) {
+            let (x0, x1) = (f[0], f[1]);
             let out0 = x0 - m0;
             let out1 = x1 - m2;
             m0 = coef * x0 + crate::celt::arch::VERY_SMALL + coef2 * m0;
             m2 = coef * x1 + crate::celt::arch::VERY_SMALL + coef2 * m2;
-            *buf.at_mut(2 * i) = out0;
-            *buf.at_mut(2 * i + 1) = out1;
+            f[0] = out0;
+            f[1] = out1;
         }
-        *hp_mem.at_mut(0) = m0;
-        *hp_mem.at_mut(2) = m2;
+        hp_mem[0] = m0;
+        hp_mem[2] = m2;
     } else {
-        let mut m0 = hp_mem.at(0);
-        for i in 0..FRAME_SIZE as usize {
-            let x = buf.at(i);
+        let mut m0 = hp_mem[0];
+        for v in buf.rg_mut(..FRAME_SIZE as usize) {
+            let x = *v;
             let y = x - m0;
             m0 = coef * x + crate::celt::arch::VERY_SMALL + coef2 * m0;
-            *buf.at_mut(i) = y;
+            *v = y;
         }
-        *hp_mem.at_mut(0) = m0;
+        hp_mem[0] = m0;
     }
 }
 
 /// Stereo width reduction, in place.
-// IX-EASY: `window.at(i)` for `i < overlap` and `buf` as `chunks_exact_mut(2)`.
 fn stereo_fade(buf: &mut [f32], g1: f32, g2: f32) {
     let overlap = modes::overlap as usize;
     let g1 = 1.0f32 - g1;
     let g2 = 1.0f32 - g2;
+    let buf = buf.rg_mut(..2 * FRAME_SIZE as usize);
     let mut i = 0usize;
     while i < overlap {
-        let mut w = modes::window.at(i);
+        let mut w = modes::window[i];
         w = w * w;
         let g = w * g2 + (1.0f32 - w) * g1;
-        let mut diff = 0.5f32 * (buf.at(i * 2) - buf.at(i * 2 + 1));
+        let mut diff = 0.5f32 * (buf[i * 2] - buf[i * 2 + 1]);
         diff = g * diff;
-        *buf.at_mut(i * 2) = buf.at(i * 2) - diff;
-        *buf.at_mut(i * 2 + 1) = buf.at(i * 2 + 1) + diff;
+        buf[i * 2] = buf[i * 2] - diff;
+        buf[i * 2 + 1] = buf[i * 2 + 1] + diff;
         i += 1;
     }
     while i < FRAME_SIZE as usize {
-        let mut diff = 0.5f32 * (buf.at(i * 2) - buf.at(i * 2 + 1));
+        let mut diff = 0.5f32 * (buf[i * 2] - buf[i * 2 + 1]);
         diff = g2 * diff;
-        *buf.at_mut(i * 2) = buf.at(i * 2) - diff;
-        *buf.at_mut(i * 2 + 1) = buf.at(i * 2 + 1) + diff;
+        buf[i * 2] = buf[i * 2] - diff;
+        buf[i * 2 + 1] = buf[i * 2 + 1] + diff;
         i += 1;
     }
 }
@@ -303,8 +301,7 @@ impl OpusEncoder {
     /// and must hold `channels * IN_BUF_FRAME` samples. `lsb_depth` is the depth of the
     /// source (24 for float input; 16 for `opus_encode` of 16-bit input scaled to +-1).
     /// Returns the packet length (1..=1276 bytes at `data`) or a negative Opus error code.
-    // IX-MIXED: `bandwidth_thresholds.at(2 * (bandwidth - MEDIUMBAND) (+ 1))` is HARD (`bandwidth` is decided at
-    // run time); `data.at_mut(0)` (`[u8; PACKET_SIZE_CAP]`) and `buf.rg_mut(..FRAME_SIZE * channels)` are EASY.
+    // IX-HARD: `bandwidth_thresholds.at(2 * (bandwidth - MEDIUMBAND) (+ 1))`: `bandwidth` is decided at run time.
     pub fn encode_float(&mut self, buf: &mut [f32], data: &mut [u8; PACKET_SIZE_CAP], lsb_depth: i32) -> i32 {
         if self.channels == 0 {
             return OPUS_BAD_ARG;
@@ -332,7 +329,7 @@ impl OpusEncoder {
         /* max_data_bytes (1276) >= 3 and the frame rate is 50 */
         if bitrate_bps < 3 * 50 * 8 {
             /*If the space is too low to do something useful, emit 'PLC' frames.*/
-            *data.at_mut(0) = if self.mode == MODE_HYBRID {
+            data[0] = if self.mode == MODE_HYBRID {
                 /* hybrid TOC: 0x60, fullband, 20 ms (bandwidth is still fullband here) */
                 0x78 | ((self.stream_channels == 2) as u8) << 2
             } else {
@@ -421,7 +418,6 @@ impl OpusEncoder {
 
     /// `opus_encode_frame_native` for CELT-only (redundancy, celt_to_silk, prefill and to_celt
     /// are all 0).
-    // IX-EASY: `buf.rg_mut(..FRAME_SIZE * channels)` and `..2 * FRAME_SIZE`: the buffer is `IN_BUF_FRAME` samples per channel.
     fn encode_frame_native(
         &mut self,
         buf: &mut [f32],
