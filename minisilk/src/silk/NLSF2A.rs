@@ -23,12 +23,12 @@ const HALF_MAX: usize = (MAX_LPC_ORDER / 2 + 1) as usize;
 #[inline(always)]
 fn silk_NLSF2A_find_poly(out: &mut [i32; HALF_MAX], cLSF: &[i32], dd: i32) {
     out[0] = silk_LSHIFT(1, QA);
-    out[1] = -cLSF[0];
+    out[1] = -cLSF.at(0);
     for k in 1..dd as usize {
-        let ftmp = cLSF[2 * k]; /* QA*/
-        out[k + 1] = silk_LSHIFT(out[k - 1], 1) - silk_RSHIFT_ROUND64(silk_SMULL(ftmp, out[k]), QA) as i32;
+        let ftmp = cLSF.at(2 * k); /* QA*/
+        *out.at_mut(k + 1) = silk_LSHIFT(out.at(k - 1), 1) - silk_RSHIFT_ROUND64(silk_SMULL(ftmp, out.at(k)), QA) as i32;
         for n in (2..=k).rev() {
-            out[n] += out[n - 2] - silk_RSHIFT_ROUND64(silk_SMULL(ftmp, out[n - 1]), QA) as i32;
+            *out.at_mut(n) += out.at(n - 2) - silk_RSHIFT_ROUND64(silk_SMULL(ftmp, out.at(n - 1)), QA) as i32;
         }
         out[1] -= ftmp;
     }
@@ -55,40 +55,40 @@ pub fn silk_NLSF2A(a_Q12: &mut [i16], NLSF: &[i16], d: i32) {
     /* convert LSFs to 2*cos(LSF), using piecewise linear curve from table */
     let ordering: &[u8] = if d == 16 { &ordering16 } else { &ordering10 };
     for k in 0..d as usize {
-        debug_assert!(NLSF[k] >= 0);
+        debug_assert!(NLSF.at(k) >= 0);
 
         /* f_int on a scale 0-127 (rounded down) */
-        let f_int = silk_RSHIFT(NLSF[k] as i32, 15 - 7);
+        let f_int = silk_RSHIFT(NLSF.at(k) as i32, 15 - 7);
 
         /* f_frac, range: 0..255 */
-        let f_frac = NLSF[k] as i32 - silk_LSHIFT(f_int, 15 - 7);
+        let f_frac = NLSF.at(k) as i32 - silk_LSHIFT(f_int, 15 - 7);
 
         debug_assert!(f_int >= 0);
         debug_assert!(f_int < LSF_COS_TAB_SZ_FIX);
 
         /* Read start and end value from table */
-        let cos_val = silk_LSFCosTab_FIX_Q12[f_int as usize] as i32; /* Q12 */
-        let delta = silk_LSFCosTab_FIX_Q12[f_int as usize + 1] as i32 - cos_val; /* Q12, with a range of 0..200 */
+        let cos_val = silk_LSFCosTab_FIX_Q12.at(f_int as usize) as i32; /* Q12 */
+        let delta = silk_LSFCosTab_FIX_Q12.at(f_int as usize + 1) as i32 - cos_val; /* Q12, with a range of 0..200 */
 
         /* Linear interpolation */
-        cos_LSF_QA[ordering[k] as usize] =
+        *cos_LSF_QA.at_mut(ordering.at(k) as usize) =
             silk_RSHIFT_ROUND(silk_LSHIFT(cos_val, 8) + silk_MUL(delta, f_frac), 20 - QA); /* QA */
     }
 
     let dd = silk_RSHIFT(d, 1);
 
     /* generate even and odd polynomials using convolution */
-    silk_NLSF2A_find_poly(&mut P, &cos_LSF_QA[0..], dd);
-    silk_NLSF2A_find_poly(&mut Q, &cos_LSF_QA[1..], dd);
+    silk_NLSF2A_find_poly(&mut P, cos_LSF_QA.rg(0..), dd);
+    silk_NLSF2A_find_poly(&mut Q, cos_LSF_QA.rg(1..), dd);
 
     /* convert even and odd polynomials to opus_int32 Q12 filter coefs */
     for k in 0..dd as usize {
-        let Ptmp = P[k + 1] + P[k];
-        let Qtmp = Q[k + 1] - Q[k];
+        let Ptmp = P.at(k + 1) + P.at(k);
+        let Qtmp = Q.at(k + 1) - Q.at(k);
 
         /* the Ptmp and Qtmp values at this stage need to fit in int32 */
-        a32_QA1[k] = -Qtmp - Ptmp; /* QA+1 */
-        a32_QA1[d as usize - k - 1] = Qtmp - Ptmp; /* QA+1 */
+        *a32_QA1.at_mut(k) = -Qtmp - Ptmp; /* QA+1 */
+        *a32_QA1.at_mut(d as usize - k - 1) = Qtmp - Ptmp; /* QA+1 */
     }
 
     /* Convert int32 coefficients to Q12 int16 coefs */
@@ -100,7 +100,7 @@ pub fn silk_NLSF2A(a_Q12: &mut [i16], NLSF: &[i16], d: i32) {
         /* on the unscaled coefficients, convert to Q12 and measure again                   */
         silk_bwexpander_32(&mut a32_QA1, d, 65536 - silk_LSHIFT(2, i));
         for k in 0..d as usize {
-            a_Q12[k] = silk_RSHIFT_ROUND(a32_QA1[k], QA + 1 - 12) as i16; /* QA+1 -> Q12 */
+            *a_Q12.at_mut(k) = silk_RSHIFT_ROUND(a32_QA1.at(k), QA + 1 - 12) as i16; /* QA+1 -> Q12 */
         }
         i += 1;
     }

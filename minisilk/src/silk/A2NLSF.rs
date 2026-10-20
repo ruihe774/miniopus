@@ -23,9 +23,9 @@ const HALF_MAX: usize = (MAX_LPC_ORDER / 2 + 1) as usize;
 fn silk_A2NLSF_trans_poly(p: &mut [i32; HALF_MAX], dd: i32) {
     for k in 2..=dd as usize {
         for n in ((k + 1)..=dd as usize).rev() {
-            p[n - 2] -= p[n];
+            *p.at_mut(n - 2) -= p.at(n);
         }
-        p[k - 2] -= silk_LSHIFT(p[k], 1);
+        *p.at_mut(k - 2) -= silk_LSHIFT(p.at(k), 1);
     }
 }
 
@@ -34,7 +34,7 @@ fn silk_A2NLSF_trans_poly(p: &mut [i32; HALF_MAX], dd: i32) {
 /// `p`: polynomial, Q16; `x`: evaluation point, Q12; `dd`: order.
 #[inline(always)]
 fn silk_A2NLSF_eval_poly(p: &[i32; HALF_MAX], x: i32, dd: i32) -> i32 {
-    let mut y32 = p[dd as usize]; /* Q16 */
+    let mut y32 = p.at(dd as usize); /* Q16 */
     let x_Q16 = silk_LSHIFT(x, 4);
 
     if 8 == dd {
@@ -48,7 +48,7 @@ fn silk_A2NLSF_eval_poly(p: &[i32; HALF_MAX], x: i32, dd: i32) -> i32 {
         y32 = silk_SMLAWW(p[0], y32, x_Q16);
     } else {
         for n in (0..dd as usize).rev() {
-            y32 = silk_SMLAWW(p[n], y32, x_Q16); /* Q16 */
+            y32 = silk_SMLAWW(p.at(n), y32, x_Q16); /* Q16 */
         }
     }
     y32
@@ -62,16 +62,16 @@ fn silk_A2NLSF_init(a_Q16: &[i32], P: &mut [i32; HALF_MAX], Q: &mut [i32; HALF_M
     P[dd] = silk_LSHIFT(1, 16);
     Q[dd] = silk_LSHIFT(1, 16);
     for k in 0..dd {
-        P[k] = -a_Q16[dd - k - 1] - a_Q16[dd + k]; /* Q16 */
-        Q[k] = -a_Q16[dd - k - 1] + a_Q16[dd + k]; /* Q16 */
+        *P.at_mut(k) = -a_Q16.at(dd - k - 1) - a_Q16.at(dd + k); /* Q16 */
+        *Q.at_mut(k) = -a_Q16.at(dd - k - 1) + a_Q16.at(dd + k); /* Q16 */
     }
 
     /* Divide out zeros as we have that for even filter orders, */
     /* z =  1 is always a root in Q, and                        */
     /* z = -1 is always a root in P                             */
     for k in (1..=dd).rev() {
-        P[k - 1] -= P[k];
-        Q[k - 1] += Q[k];
+        *P.at_mut(k - 1) -= P.at(k);
+        *Q.at_mut(k - 1) += Q.at(k);
     }
 
     /* Transform polynomials from cos(n*f) to cos(f)^n */
@@ -115,7 +115,7 @@ pub fn silk_A2NLSF(NLSF: &mut [i16], a_Q16: &mut [i32], d: i32) {
     let mut thr: i32 = 0;
     loop {
         /* Evaluate polynomial */
-        let mut xhi = silk_LSFCosTab_FIX_Q12[k as usize] as i32; /* Q12 */
+        let mut xhi = silk_LSFCosTab_FIX_Q12.at(k as usize) as i32; /* Q12 */
         let mut yhi = silk_A2NLSF_eval_poly(if pq == 0 { &P } else { &Q }, xhi, dd);
 
         /* Detect zero crossing */
@@ -159,9 +159,9 @@ pub fn silk_A2NLSF(NLSF: &mut [i16], a_Q16: &mut [i32], d: i32) {
                 /* No risk of dividing by zero because abs(ylo - yhi) >= abs(ylo) >= 65536 */
                 ffrac += silk_DIV32(ylo, silk_RSHIFT(ylo - yhi, 8 - BIN_DIV_STEPS_A2NLSF_FIX));
             }
-            NLSF[root_ix as usize] = silk_min_32(silk_LSHIFT(k, 8) + ffrac, silk_int16_MAX) as i16;
+            *NLSF.at_mut(root_ix as usize) = silk_min_32(silk_LSHIFT(k, 8) + ffrac, silk_int16_MAX) as i16;
 
-            debug_assert!(NLSF[root_ix as usize] >= 0);
+            debug_assert!(NLSF.at(root_ix as usize) >= 0);
 
             root_ix += 1; /* Next root */
             if root_ix >= d {
@@ -172,7 +172,7 @@ pub fn silk_A2NLSF(NLSF: &mut [i16], a_Q16: &mut [i32], d: i32) {
             pq = (root_ix & 1) as usize;
 
             /* Evaluate polynomial */
-            xlo = silk_LSFCosTab_FIX_Q12[(k - 1) as usize] as i32; /* Q12*/
+            xlo = silk_LSFCosTab_FIX_Q12.at((k - 1) as usize) as i32; /* Q12*/
             ylo = silk_LSHIFT(1 - (root_ix & 2), 12);
         } else {
             /* Increment loop counter */
@@ -187,7 +187,7 @@ pub fn silk_A2NLSF(NLSF: &mut [i16], a_Q16: &mut [i32], d: i32) {
                     /* Set NLSFs to white spectrum and exit */
                     NLSF[0] = silk_DIV32_16(1 << 15, d + 1) as i16;
                     for k in 1..d as usize {
-                        NLSF[k] = NLSF[k - 1].wrapping_add(NLSF[0]);
+                        *NLSF.at_mut(k) = NLSF.at(k - 1).wrapping_add(NLSF.at(0));
                     }
                     return;
                 }
