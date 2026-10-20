@@ -757,9 +757,6 @@ unsafe fn quant_partition(
 /// # Safety
 /// `X` valid for `N` floats; `lowband`, `lowband_out`, `lowband_scratch` (each nullable) valid
 /// for `N` floats; `lowband_scratch` must not overlap `X` or `lowband`.
-// IX-HARD: `bit_deinterleave_table.at(cm)` (`cm` is a collapse mask accumulated from the coded bands, no bound
-// but the table). The masked `bit_interleave_table.at(fill & 0xF)` and the `x.at(j)` loop over `N` are left
-// on `Ix` too, since the function keeps `Ix` for `cm`; not measured.
 unsafe fn quant_band(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -813,8 +810,8 @@ unsafe fn quant_band(
                 haar1(slice_mut(lowband, N), N >> k, 1 << k);
             }
         }
-        fill = bit_interleave_table.at((fill & 0xF) as usize) as i32
-            | (bit_interleave_table.at((fill >> 4) as usize) as i32) << 2;
+        fill = bit_interleave_table[(fill & 0xF) as usize] as i32
+            | (bit_interleave_table[(fill >> 4) as usize] as i32) << 2;
     }
     B >>= recombine;
     N_B <<= recombine;
@@ -869,7 +866,7 @@ unsafe fn quant_band(
         for k in 0..recombine {
             static bit_deinterleave_table: [u8; 16] =
                 [0x00, 0x03, 0x0C, 0x0F, 0x30, 0x33, 0x3C, 0x3F, 0xC0, 0xC3, 0xCC, 0xCF, 0xF0, 0xF3, 0xFC, 0xFF];
-            cm = bit_deinterleave_table.at(cm as usize) as u32;
+            cm = bit_deinterleave_table[cm as usize] as u32;
             haar1(x, N0 >> k, 1 << k);
         }
         B <<= recombine;
@@ -877,8 +874,9 @@ unsafe fn quant_band(
         /* Scale output for later folding */
         if !lowband_out.is_null() {
             let n: f32 = crate::celt::arch::sqrt64(N0 as f64) as f32;
-            for j in 0..N0 as usize {
-                unsafe { *lowband_out.add(j) = n * x.at(j) };
+            let lowband_out = unsafe { slice_mut(lowband_out, N0) };
+            for (o, &v) in lowband_out.iter_mut().zip(x.iter()) {
+                *o = n * v;
             }
         }
         cm &= ((1 << B) - 1) as u32;
