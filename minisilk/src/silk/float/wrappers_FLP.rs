@@ -29,7 +29,7 @@ pub fn silk_A2NLSF_FLP(
     let mut a_fix_Q16 = [0i32; MAX_LPC_ORDER_];
 
     for i in 0..LPC_order as usize {
-        a_fix_Q16[i] = silk_float2int(pAR[i] * 65536.0f32);
+        *a_fix_Q16.at_mut(i) = silk_float2int(pAR.at(i) * 65536.0f32);
     }
 
     silk_A2NLSF(NLSF_Q15, &mut a_fix_Q16, LPC_order);
@@ -46,7 +46,7 @@ pub fn silk_NLSF2A_FLP(
     silk_NLSF2A(&mut a_fix_Q12, NLSF_Q15, LPC_order);
 
     for i in 0..LPC_order as usize {
-        pAR[i] = a_fix_Q12[i] as f32 * (1.0f32 / 4096.0f32);
+        *pAR.at_mut(i) = a_fix_Q12.at(i) as f32 * (1.0f32 / 4096.0f32);
     }
 }
 
@@ -205,10 +205,10 @@ pub fn silk_quant_LTP_gains_FLP(
 
     let nb_subfr_ = nb_subfr as usize;
     for i in 0..nb_subfr_ * LTP_ORDER_ * LTP_ORDER_ {
-        XX_Q17[i] = silk_float2int(XX[i] * 131072.0f32);
+        *XX_Q17.at_mut(i) = silk_float2int(XX.at(i) * 131072.0f32);
     }
     for i in 0..nb_subfr_ * LTP_ORDER_ {
-        xX_Q17[i] = silk_float2int(xX[i] * 131072.0f32);
+        *xX_Q17.at_mut(i) = silk_float2int(xX.at(i) * 131072.0f32);
     }
 
     silk_quant_LTP_gains(
@@ -224,7 +224,7 @@ pub fn silk_quant_LTP_gains_FLP(
     );
 
     for i in 0..nb_subfr_ * LTP_ORDER_ {
-        B[i] = B_Q14[i] as f32 * (1.0f32 / 16384.0f32);
+        *B.at_mut(i) = B_Q14.at(i) as f32 * (1.0f32 / 16384.0f32);
     }
 
     *pred_gain_dB = pred_gain_dB_Q7 as f32 * (1.0f32 / 128.0f32);
