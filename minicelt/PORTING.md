@@ -106,7 +106,7 @@ bit-exact comparison below. What was removed or specialized:
   `x.rg(a..b)`), unchecked like C in release and checked in the `checked` profile (debug
   assertions). This removed several hundred panic sites (about 14 KB of code and source
   locations) at no change in behaviour. New code should use it, and run the `checked` tests.
-- Memory: the pseudostack is 16 KiB (was 56 KiB) and the shadow stack 2 KiB (was 1 MiB), so the whole
+- Memory: the pseudostack is 16 KiB (was 56 KiB) and the shadow stack 8 KiB (was 1 MiB; the module stays one page up to about 10 KiB), so the whole
   module is one 64 KiB wasm page (was 18). What got the pseudostack down: `norm` of
   `quant_all_bands` only exists when the theta RDO resynthesises (without it the folding source
   is never read), the C `X` buffer is the `in` buffer, which with the PCM copy is the caller's static
