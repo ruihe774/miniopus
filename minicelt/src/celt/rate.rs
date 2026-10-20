@@ -50,11 +50,13 @@ pub fn bits2pulses(band: i32, LM: i32, mut bits: i32) -> i32 {
 }
 
 /// Fixed interface (used by bands.rs).
-// IX-HARD: `cache_bits.rg(cache_index.at(..)..)` then `cache.at(pulses)`: table-driven indices.
+#[inline(always)]
 pub fn pulses2bits(band: i32, LM: i32, pulses: i32) -> i32 {
     let LM = LM + 1;
-    let cache = modes::cache_bits.rg(modes::cache_index.at((LM * modes::nbEBands + band) as usize) as usize..);
-    if pulses == 0 { 0 } else { cache.at(pulses as usize) as i32 + 1 }
+    /* the window of `bits2pulses` (pulses <= 40) */
+    let ci = modes::cache_index[(LM * modes::nbEBands + band) as usize] as usize;
+    let cache: &[u8; 65] = modes::cache_bits[ci..].first_chunk().unwrap();
+    if pulses == 0 { 0 } else { cache[pulses as usize] as i32 + 1 }
 }
 
 const ALLOC_STEPS: i32 = 6;
