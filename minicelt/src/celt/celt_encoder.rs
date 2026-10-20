@@ -565,8 +565,6 @@ pub fn tf_analysis(
 
 /// Codes the tf_res flags of bands `start..end` and `tf_select`, then converts `tf_res[start..end]`
 /// to the final per-band tf change via `tf_select_table`.
-// IX-HARD: `tf_select_table.at(4 * isTransient + 2 * tf_select + tf_res)`: index computed from coded values.
-// The band-level `tf_res` loop over `start..end` is left on `Ix` too; not measured.
 pub fn tf_encode(start: i32, end: i32, isTransient: i32, tf_res: &mut [i32], mut tf_select: i32, enc: &mut ec_enc) {
     let mut budget: u32 = enc.storage * 8;
     let mut tell: u32 = ec_tell(enc) as u32;
@@ -576,28 +574,28 @@ pub fn tf_encode(start: i32, end: i32, isTransient: i32, tf_res: &mut [i32], mut
     budget -= tf_select_rsv;
     let mut curr: i32 = 0;
     let mut tf_changed: i32 = 0;
-    for i in start as usize..end as usize {
+    let tf_res = &mut tf_res[start as usize..end as usize];
+    for r in tf_res.iter_mut() {
         if tell + logp as u32 <= budget {
-            ec_enc_bit_logp(enc, tf_res.at(i) ^ curr, logp as u32);
+            ec_enc_bit_logp(enc, *r ^ curr, logp as u32);
             tell = ec_tell(enc) as u32;
-            curr = tf_res.at(i);
+            curr = *r;
             tf_changed |= curr;
         } else {
-            *tf_res.at_mut(i) = curr;
+            *r = curr;
         }
         logp = if isTransient != 0 { 4 } else { 5 };
     }
     /* Only code tf_select if it would actually make a difference. */
-    let t = &tf_select_table;
-    if tf_select_rsv != 0
-        && t.at((4 * isTransient + 0 + tf_changed) as usize) != t.at((4 * isTransient + 2 + tf_changed) as usize)
-    {
+    /* tf_select_table[LM][4*isTransient + ..]; isTransient, tf_select and the flags are 0 or 1 */
+    let t: &[i8; 4] = tf_select_table[4 * (isTransient & 1) as usize..][..4].try_into().unwrap();
+    if tf_select_rsv != 0 && t[(tf_changed & 1) as usize] != t[(2 + (tf_changed & 1)) as usize] {
         ec_enc_bit_logp(enc, tf_select, 1);
     } else {
         tf_select = 0;
     }
-    for i in start as usize..end as usize {
-        *tf_res.at_mut(i) = t.at((4 * isTransient + 2 * tf_select + tf_res.at(i)) as usize) as i32;
+    for r in tf_res.iter_mut() {
+        *r = t[((2 * tf_select + *r) & 3) as usize] as i32;
     }
 }
 
