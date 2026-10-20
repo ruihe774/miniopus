@@ -62,9 +62,8 @@ pub fn pulses2bits(band: i32, LM: i32, pulses: i32) -> i32 {
 const ALLOC_STEPS: i32 = 6;
 
 #[inline(always)]
-// IX-HARD: `eBands.at(i)` with `i` from the callers' band counters (`codedBands`, `j + 1`).
 fn eb(i: i32) -> i32 {
-    modes::eBands.at(i as usize) as i32
+    modes::eBands[i as usize] as i32
 }
 
 // IX-HARD: `LOG2_FRAC_TABLE.at(j - start)`, `modes::logN.at(ju)`, `eb(..)`: indexed by band counters with no length to prove them against.
