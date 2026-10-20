@@ -133,7 +133,6 @@ impl CELTEncoder {
 /// celt_encoder_init(st, 48000, channels) = opus_custom_encoder_init_arch(st, mode48000_960_120,
 /// channels) with the OPUS_RESET_STATE of its end. `st` is the all-zero state (the Opus layer
 /// clears it first) and `channels` is 1 or 2.
-// IX-EASY: one loop over `channels * nbEBands`; re-slice the state arrays to that length.
 pub fn celt_encoder_init(st: &mut CELTEncoder, channels: i32) {
     st.channels = channels;
     st.stream_channels = channels;
@@ -146,9 +145,13 @@ pub fn celt_encoder_init(st: &mut CELTEncoder, channels: i32) {
     st.lsb_depth = 24;
 
     /* celt_encoder_reset_state(): everything from rng on is zero already, except: */
-    for i in 0..(channels * modes::nbEBands) as usize {
-        *st.oldLogE2.at_mut(i) = -28.0f32;
-        *st.oldLogE.at_mut(i) = -28.0f32;
+    let n = (channels * modes::nbEBands) as usize;
+    debug_assert!(n <= st.oldLogE.len() && n <= st.oldLogE2.len());
+    for v in st.oldLogE2.iter_mut().take(n) {
+        *v = -28.0f32;
+    }
+    for v in st.oldLogE.iter_mut().take(n) {
+        *v = -28.0f32;
     }
     st.delayedIntra = 1.0;
     st.spread_decision = SPREAD_NORMAL;
@@ -298,33 +301,35 @@ pub fn transient_analysis(
 
 /// Looks for sudden increases of energy to decide whether we need to patch
 /// the transient decision. `newE`/`oldE` are the band log energies (`C` channels of `nbEBands`).
-// IX-EASY: loops over `start..end` on `newE`/`oldE`/`spread_old`; re-slice to `end` (and `end + nb`).
 pub fn patch_transient_decision(newE: &[f32], oldE: &[f32], nbEBands: i32, start: i32, end: i32, C: i32) -> i32 {
     let mut mean_diff: f32 = 0.0;
     let mut spread_old = [0.0f32; 26];
     let nb = nbEBands as usize;
     let (start, end) = (start as usize, end as usize);
+    let spread_old = &mut spread_old[..end];
     /* Apply an aggressive (-6 dB/Bark) spreading function to the old frame to
     avoid false detection caused by irrelevant bands */
     if C == 1 {
-        *spread_old.at_mut(start) = oldE.at(start);
+        spread_old[start] = oldE[start];
         for i in start + 1..end {
-            *spread_old.at_mut(i) = MAX32(spread_old.at(i - 1) - 1.0, oldE.at(i));
+            spread_old[i] = MAX32(spread_old[i - 1] - 1.0, oldE[i]);
         }
     } else {
-        *spread_old.at_mut(start) = MAX32(oldE.at(start), oldE.at(start + nb));
+        let (o0, o1) = (&oldE[..end], &oldE[nb..nb + end]);
+        spread_old[start] = MAX32(o0[start], o1[start]);
         for i in start + 1..end {
-            *spread_old.at_mut(i) = MAX32(spread_old.at(i - 1) - 1.0, MAX32(oldE.at(i), oldE.at(i + nb)));
+            spread_old[i] = MAX32(spread_old[i - 1] - 1.0, MAX32(o0[i], o1[i]));
         }
     }
     for i in (start..end - 1).rev() {
-        *spread_old.at_mut(i) = MAX32(spread_old.at(i), spread_old.at(i + 1) - 1.0);
+        spread_old[i] = MAX32(spread_old[i], spread_old[i + 1] - 1.0);
     }
     /* Compute mean increase */
     for c in 0..C as usize {
+        let new = &newE[c * nb..c * nb + end];
         for i in IMAX(2, start as i32) as usize..end - 1 {
-            let x1 = MAX32(0.0, newE.at(i + c * nb));
-            let x2 = MAX32(0.0, spread_old.at(i));
+            let x1 = MAX32(0.0, new[i]);
+            let x2 = MAX32(0.0, spread_old[i]);
             mean_diff = mean_diff + MAX32(0.0, x1 - x2);
         }
     }
@@ -335,7 +340,6 @@ pub fn patch_transient_decision(newE: &[f32], oldE: &[f32], nbEBands: i32, start
 /// Apply window and compute the MDCT for all sub-frames and all channels in a frame.
 /// `in_` is the whole `in` buffer (`CC*(B*N+overlap)` samples, channel `c` at `c*(B*N+overlap)`),
 /// `out` the `C*B*N` coefficients. (`upsample` is always 1, LM is 3.)
-// IX-EASY: `out[..2 * B * N]` re-slice, then a plain loop.
 pub fn compute_mdcts(shortBlocks: i32, in_: &[f32], out: &mut [f32], C: i32, CC: i32) {
     let overlap = modes::overlap;
     let N: i32;
@@ -357,8 +361,12 @@ pub fn compute_mdcts(shortBlocks: i32, in_: &[f32], out: &mut [f32], C: i32, CC:
         }
     }
     if CC == 2 && C == 1 {
-        for i in 0..(B * N) as usize {
-            *out.at_mut(i) = 0.5 * out.at(i) + 0.5 * out.at((B * N) as usize + i);
+        let n = (B * N) as usize;
+        debug_assert!(out.len() >= 2 * n);
+        if let Some((lo, hi)) = out.split_at_mut_checked(n) {
+            for (l, &h) in lo.iter_mut().zip(hi.iter()) {
+                *l = 0.5 * *l + 0.5 * h;
+            }
         }
     }
 }
@@ -367,45 +375,46 @@ pub fn compute_mdcts(shortBlocks: i32, in_: &[f32], out: &mut [f32], C: i32, CC:
 /// starting at channel `c`); `inp[0..N]` receives the pre-emphasized signal
 /// (`in+c*(N+overlap)+overlap` of the caller); `*mem` is `preemph_memE[c]`. The coefficient is
 /// `mode->preemph[0]` (`preemph[1] == 0`; `upsample` is always 1, `clip` is always set).
-// IX-EASY: `inp[..N]` re-slice and `pcmp.iter().step_by(CC)`.
 pub fn celt_preemphasis(pcmp: &[f32], inp: &mut [f32], N: i32, CC: i32, mem: &mut f32, need_clip: bool) {
     let coef0 = modes::preemph0;
     let mut m = *mem;
     let (N, CC) = (N as usize, CC as usize);
+    debug_assert!(N == 0 || pcmp.len() > CC * (N - 1));
+    let inp = &mut inp[..N];
+    let samples = pcmp.iter().step_by(CC);
 
     /* Fast path for the normal 48kHz case and no clipping */
     if !need_clip {
-        for i in 0..N {
-            let x = CELT_SIG_SCALE * pcmp.at(CC * i);
+        for (o, &p) in inp.iter_mut().zip(samples) {
+            let x = CELT_SIG_SCALE * p;
             /* Apply pre-emphasis */
-            *inp.at_mut(i) = x - m;
+            *o = x - m;
             m = coef0 * x;
         }
         *mem = m;
         return;
     }
 
-    for i in 0..N {
-        *inp.at_mut(i) = CELT_SIG_SCALE * pcmp.at(CC * i);
+    for (o, &p) in inp.iter_mut().zip(samples) {
+        *o = CELT_SIG_SCALE * p;
     }
     /* Clip input to avoid encoding non-portable files */
-    for i in 0..N {
-        *inp.at_mut(i) = MAX32(-65536.0, MIN32(65536.0, inp.at(i)));
+    for o in inp.iter_mut() {
+        *o = MAX32(-65536.0, MIN32(65536.0, *o));
     }
-    for i in 0..N {
-        let x = inp.at(i);
+    for o in inp.iter_mut() {
+        let x = *o;
         /* Apply pre-emphasis */
-        *inp.at_mut(i) = x - m;
+        *o = x - m;
         m = coef0 * x;
     }
     *mem = m;
 }
 
-// IX-EASY: sum over `tmp[..N]`.
 pub fn l1_metric(tmp: &[f32], N: i32, lm: i32, bias: f32) -> f32 {
     let mut L1: f32 = 0.0;
-    for i in 0..N as usize {
-        L1 += ABS16(tmp.at(i));
+    for &t in &tmp[..N as usize] {
+        L1 += ABS16(t);
     }
     /* When in doubt, prefer good freq resolution */
     L1 = L1 + (lm as f32 * bias) * L1;
@@ -689,23 +698,24 @@ pub fn stereo_analysis(X: &[f32], N0: i32) -> i32 {
 }
 
 /// Median of `x[0..5]`.
-// IX-EASY: constant indices 0..5; take `&[f32; 5]` or re-slice `x[..5]`.
 pub fn median_of_5(x: &[f32]) -> f32 {
+    debug_assert!(x.len() >= 5);
+    let Some(&[x0, x1, x2, x3, x4]) = x.first_chunk::<5>() else { return 0.0 };
     let (mut t0, mut t1, t2, mut t3, mut t4): (f32, f32, f32, f32, f32);
-    t2 = x.at(2);
-    if x.at(0) > x.at(1) {
-        t0 = x.at(1);
-        t1 = x.at(0);
+    t2 = x2;
+    if x0 > x1 {
+        t0 = x1;
+        t1 = x0;
     } else {
-        t0 = x.at(0);
-        t1 = x.at(1);
+        t0 = x0;
+        t1 = x1;
     }
-    if x.at(3) > x.at(4) {
-        t3 = x.at(4);
-        t4 = x.at(3);
+    if x3 > x4 {
+        t3 = x4;
+        t4 = x3;
     } else {
-        t3 = x.at(3);
-        t4 = x.at(4);
+        t3 = x3;
+        t4 = x4;
     }
     if t0 > t3 {
         core::mem::swap(&mut t0, &mut t3);
@@ -727,17 +737,17 @@ pub fn median_of_5(x: &[f32]) -> f32 {
 }
 
 /// Median of `x[0..3]`.
-// IX-EASY: constant indices 0..3; take `&[f32; 3]` or re-slice `x[..3]`.
 pub fn median_of_3(x: &[f32]) -> f32 {
+    debug_assert!(x.len() >= 3);
+    let Some(&[x0, x1, t2]) = x.first_chunk::<3>() else { return 0.0 };
     let (t0, t1): (f32, f32);
-    if x.at(0) > x.at(1) {
-        t0 = x.at(1);
-        t1 = x.at(0);
+    if x0 > x1 {
+        t0 = x1;
+        t1 = x0;
     } else {
-        t0 = x.at(0);
-        t1 = x.at(1);
+        t0 = x0;
+        t1 = x1;
     }
-    let t2 = x.at(2);
     if t1 < t2 {
         t1
     } else if t0 < t2 {
@@ -752,8 +762,6 @@ pub fn median_of_3(x: &[f32]) -> f32 {
 /// Dropped parameters: `oldBandE` (only used for `LM == 0`), `vbr` (always 1: CBR removed),
 /// `lfe`, `surround_dynalloc` (all-zero without energy mask, folded into a `MAXG(.., 0)`),
 /// `analysis`, `qext_scale`.
-// IX-EASY: every site is a loop over `0..endu` (or `c * nb + i`) on band arrays of length `nb`/`C * nb`;
-// re-slice them to `endu` (per channel) up front.
 pub fn dynalloc_analysis(
     bandLogE: &[f32],
     bandLogE2: &[f32],
@@ -781,46 +789,47 @@ pub fn dynalloc_analysis(
     let follower = sg.alloc::<f32>(C as usize * nb);
     let noise_floor = sg.alloc::<f32>(C as usize * nb);
     let bandLogE3 = sg.alloc::<f32>(nb);
-    offsets.rg_mut(..nb).fill(0);
+    offsets[..nb].fill(0);
+    let noise_floor = &mut noise_floor[..endu];
+    let eBands = &eBands[..endu + 1];
     /* Dynamic allocation code */
     let mut maxDepth: f32 = -31.9;
-    for i in 0..endu {
+    for (i, (nf, (&n, &m))) in noise_floor.iter_mut().zip(logN.iter().zip(eMeans.iter())).enumerate() {
         /* Noise floor must take into account eMeans, the depth, the width of the bands
         and the preemphasis filter (approx. square of bark band ID) */
-        *noise_floor.at_mut(i) = 0.0625 * logN.at(i) as f32 + 0.5 + (9 - lsb_depth) as f32 - eMeans.at(i)
-            + 0.0062 * (i as i32 + 5) as f32 * (i as i32 + 5) as f32;
+        *nf = 0.0625 * n as f32 + 0.5 + (9 - lsb_depth) as f32 - m + 0.0062 * (i as i32 + 5) as f32 * (i as i32 + 5) as f32;
     }
     for c in 0..C as usize {
-        for i in 0..endu {
-            maxDepth = MAX32(maxDepth, bandLogE.at(c * nb + i) - noise_floor.at(i));
+        for (&b, &nf) in bandLogE[c * nb..c * nb + endu].iter().zip(noise_floor.iter()) {
+            maxDepth = MAX32(maxDepth, b - nf);
         }
     }
     {
         /* Compute a really simple masking model to avoid taking into account completely masked
         bands when computing the spreading decision. */
-        let mask = sg.alloc::<f32>(nb);
-        let sig = sg.alloc::<f32>(nb);
-        for i in 0..endu {
-            *mask.at_mut(i) = bandLogE.at(i) - noise_floor.at(i);
+        let mask = &mut sg.alloc::<f32>(nb)[..endu];
+        let sig = &mut sg.alloc::<f32>(nb)[..endu];
+        for ((m, &b), &nf) in mask.iter_mut().zip(&bandLogE[..endu]).zip(noise_floor.iter()) {
+            *m = b - nf;
         }
         if C == 2 {
-            for i in 0..endu {
-                *mask.at_mut(i) = MAX32(mask.at(i), bandLogE.at(nb + i) - noise_floor.at(i));
+            for ((m, &b), &nf) in mask.iter_mut().zip(&bandLogE[nb..nb + endu]).zip(noise_floor.iter()) {
+                *m = MAX32(*m, b - nf);
             }
         }
-        sig.rg_mut(..endu).copy_from_slice(mask.rg(..endu));
+        sig.copy_from_slice(mask);
         for i in 1..endu {
-            *mask.at_mut(i) = MAX32(mask.at(i), mask.at(i - 1) - 2.0);
+            mask[i] = MAX32(mask[i], mask[i - 1] - 2.0);
         }
         for i in (0..endu - 1).rev() {
-            *mask.at_mut(i) = MAX32(mask.at(i), mask.at(i + 1) - 3.0);
+            mask[i] = MAX32(mask[i], mask[i + 1] - 3.0);
         }
-        for i in 0..endu {
+        for ((sw, &s), &m) in spread_weight[..endu].iter_mut().zip(sig.iter()).zip(mask.iter()) {
             /* Compute SMR: Mask is never more than 72 dB below the peak and never below the noise floor.*/
-            let smr: f32 = sig.at(i) - MAX32(MAX32(0.0, maxDepth - 12.0), mask.at(i));
+            let smr: f32 = s - MAX32(MAX32(0.0, maxDepth - 12.0), m);
             /* Clamp SMR to make sure we're not shifting by something negative or too large. */
             let shift: i32 = IMIN(5, IMAX(0, -(crate::celt::arch::floor64((0.5f32 + smr) as f64) as i32)));
-            *spread_weight.at_mut(i) = 32 >> shift;
+            *sw = 32 >> shift;
         }
     }
     /* Make sure that dynamic allocation can't make us bust the budget.
@@ -829,21 +838,22 @@ pub fn dynalloc_analysis(
     if effectiveBytes >= (30 + 5 * LM) {
         let mut last: usize = 0;
         for c in 0..C as usize {
-            bandLogE3.rg_mut(..endu).copy_from_slice(bandLogE2.rg(c * nb..c * nb + endu));
+            let bandLogE3 = &mut bandLogE3[..endu];
+            bandLogE3.copy_from_slice(&bandLogE2[c * nb..c * nb + endu]);
             /* (LM == 0 special case removed: LM is always 3 here) */
-            let f = follower.rg_mut(c * nb..(c + 1) * nb);
-            *f.at_mut(0) = bandLogE3.at(0);
+            let f = &mut follower[c * nb..c * nb + endu];
+            f[0] = bandLogE3[0];
             for i in 1..endu {
                 /* The last band to be at least 3 dB higher than the previous one
                 is the last we'll consider. Otherwise, we run into problems on
                 bandlimited signals. */
-                if bandLogE3.at(i) > bandLogE3.at(i - 1) + 0.5 {
+                if bandLogE3[i] > bandLogE3[i - 1] + 0.5 {
                     last = i;
                 }
-                *f.at_mut(i) = MIN32(f.at(i - 1) + 1.5, bandLogE3.at(i));
+                f[i] = MIN32(f[i - 1] + 1.5, bandLogE3[i]);
             }
             for i in (0..last).rev() {
-                *f.at_mut(i) = MIN32(f.at(i), MIN32(f.at(i + 1) + 2.0, bandLogE3.at(i)));
+                f[i] = MIN32(f[i], MIN32(f[i + 1] + 2.0, bandLogE3[i]));
             }
 
             /* Combine with a median filter to avoid dynalloc triggering unnecessarily.
@@ -851,52 +861,54 @@ pub fn dynalloc_analysis(
             reduces the impact of the median filter and makes dynalloc use more bits. */
             let offset: f32 = 1.0;
             for i in 2..endu - 2 {
-                *f.at_mut(i) = MAX32(f.at(i), median_of_5(&bandLogE3[i - 2..]) - offset);
+                f[i] = MAX32(f[i], median_of_5(&bandLogE3[i - 2..]) - offset);
             }
-            let tmp = median_of_3(bandLogE3.rg(0..)) - offset;
-            *f.at_mut(0) = MAX32(f.at(0), tmp);
-            *f.at_mut(1) = MAX32(f.at(1), tmp);
-            let tmp = median_of_3(bandLogE3.rg(endu - 3..)) - offset;
-            *f.at_mut(endu - 2) = MAX32(f.at(endu - 2), tmp);
-            *f.at_mut(endu - 1) = MAX32(f.at(endu - 1), tmp);
+            let tmp = median_of_3(bandLogE3) - offset;
+            f[0] = MAX32(f[0], tmp);
+            f[1] = MAX32(f[1], tmp);
+            let tmp = median_of_3(&bandLogE3[endu - 3..]) - offset;
+            f[endu - 2] = MAX32(f[endu - 2], tmp);
+            f[endu - 1] = MAX32(f[endu - 1], tmp);
 
-            for i in 0..endu {
-                *f.at_mut(i) = MAX32(f.at(i), noise_floor.at(i));
+            for (v, &nf) in f.iter_mut().zip(noise_floor.iter()) {
+                *v = MAX32(*v, nf);
             }
         }
-        let (start, endu) = (start as usize, end as usize);
+        let start = start as usize;
+        let (f0, f1) = follower.split_at_mut(nb);
+        let f0 = &mut f0[..endu];
         if C == 2 {
+            let f1 = &mut f1[..endu];
             for i in start..endu {
                 /* Consider 24 dB "cross-talk" */
-                *follower.at_mut(nb + i) = MAX32(follower.at(nb + i), follower.at(i) - 4.0);
-                *follower.at_mut(i) = MAX32(follower.at(i), follower.at(nb + i) - 4.0);
-                *follower.at_mut(i) =
-                    0.5 * (MAX32(0.0, bandLogE.at(i) - follower.at(i)) + MAX32(0.0, bandLogE.at(nb + i) - follower.at(nb + i)));
+                f1[i] = MAX32(f1[i], f0[i] - 4.0);
+                f0[i] = MAX32(f0[i], f1[i] - 4.0);
+                f0[i] = 0.5 * (MAX32(0.0, bandLogE[i] - f0[i]) + MAX32(0.0, bandLogE[nb + i] - f1[i]));
             }
         } else {
             for i in start..endu {
-                *follower.at_mut(i) = MAX32(0.0, bandLogE.at(i) - follower.at(i));
+                f0[i] = MAX32(0.0, bandLogE[i] - f0[i]);
             }
         }
-        for i in start..endu {
+        for v in &mut f0[start..] {
             /* surround_dynalloc[i] == 0 */
-            *follower.at_mut(i) = MAX32(follower.at(i), 0.0);
+            *v = MAX32(*v, 0.0);
         }
-        for i in start..endu {
-            *importance.at_mut(i) = crate::celt::arch::floor64((0.5f32 + 13.0 * celt_exp2_db(MIN32(follower.at(i), 4.0))) as f64) as i32;
+        for (imp, &v) in importance[start..endu].iter_mut().zip(&f0[start..]) {
+            *imp = crate::celt::arch::floor64((0.5f32 + 13.0 * celt_exp2_db(MIN32(v, 4.0))) as f64) as i32;
         }
         /* For non-transient CBR/CVBR frames, halve the dynalloc contribution */
         if constrained_vbr != 0 && isTransient == 0 {
-            for i in start..endu {
-                *follower.at_mut(i) = 0.5 * follower.at(i);
+            for v in &mut f0[start..] {
+                *v = 0.5 * *v;
             }
         }
         for i in start..endu {
             if i < 8 {
-                *follower.at_mut(i) *= 2.0;
+                f0[i] *= 2.0;
             }
             if i >= 12 {
-                *follower.at_mut(i) = 0.5 * follower.at(i);
+                f0[i] = 0.5 * f0[i];
             }
         }
         /* Compensate for Opus' under-allocation on tones. */
@@ -904,23 +916,23 @@ pub fn dynalloc_analysis(
             /* `.5 + tone_freq*120/M_PI`: float product, then double */
             let freq_bin: i32 = crate::celt::arch::floor64(0.5 + (tone_freq * 120.0) as f64 / PI) as i32;
             for i in start..endu {
-                let (lo, hi) = (eBands.at(i) as i32, eBands.at(i + 1) as i32);
+                let (lo, hi) = (eBands[i] as i32, eBands[i + 1] as i32);
                 if freq_bin >= lo && freq_bin <= hi {
-                    *follower.at_mut(i) += 2.0;
+                    f0[i] += 2.0;
                 }
                 if freq_bin >= lo - 1 && freq_bin <= hi + 1 {
-                    *follower.at_mut(i) += 1.0;
+                    f0[i] += 1.0;
                 }
                 if freq_bin >= lo - 2 && freq_bin <= hi + 2 {
-                    *follower.at_mut(i) += 1.0;
+                    f0[i] += 1.0;
                 }
                 if freq_bin >= lo - 3 && freq_bin <= hi + 3 {
-                    *follower.at_mut(i) += 0.5;
+                    f0[i] += 0.5;
                 }
             }
-            if freq_bin >= eBands.at(endu) as i32 {
-                *follower.at_mut(endu - 1) += 2.0;
-                *follower.at_mut(endu - 2) += 1.0;
+            if freq_bin >= eBands[endu] as i32 {
+                f0[endu - 1] += 2.0;
+                f0[endu - 2] += 1.0;
             }
         }
         /* (analysis->valid is always 0: no leak_boost) */
@@ -929,18 +941,18 @@ pub fn dynalloc_analysis(
             let boost: i32;
             let boost_bits: i32;
 
-            *follower.at_mut(i) = MIN32(follower.at(i), 4.0);
+            f0[i] = MIN32(f0[i], 4.0);
 
             /* (SHR32 by 8 is the identity in the float build) */
-            width = C * (eBands.at(i + 1) as i32 - eBands.at(i) as i32) << LM;
+            width = C * (eBands[i + 1] as i32 - eBands[i] as i32) << LM;
             if width < 6 {
-                boost = follower.at(i) as i32;
+                boost = f0[i] as i32;
                 boost_bits = boost * width << BITRES;
             } else if width > 48 {
-                boost = (follower.at(i) * 8.0) as i32;
+                boost = (f0[i] * 8.0) as i32;
                 boost_bits = (boost * width << BITRES) / 8;
             } else {
-                boost = (follower.at(i) * width as f32 / 6.0) as i32;
+                boost = (f0[i] * width as f32 / 6.0) as i32;
                 boost_bits = boost * 6 << BITRES;
             }
             /* For CBR and non-transient CVBR frames, limit dynalloc to 2/3 of the bits */
@@ -948,18 +960,16 @@ pub fn dynalloc_analysis(
                 && (tot_boost + boost_bits) >> BITRES >> 3 > 2 * effectiveBytes / 3
             {
                 let cap: i32 = (2 * effectiveBytes / 3) << BITRES << 3;
-                *offsets.at_mut(i) = cap - tot_boost;
+                offsets[i] = cap - tot_boost;
                 tot_boost = cap;
                 break;
             } else {
-                *offsets.at_mut(i) = boost;
+                offsets[i] = boost;
                 tot_boost += boost_bits;
             }
         }
     } else {
-        for i in start as usize..end as usize {
-            *importance.at_mut(i) = 13;
-        }
+        importance[start as usize..end as usize].fill(13);
     }
     *tot_boost_ = tot_boost;
     maxDepth
@@ -967,7 +977,6 @@ pub fn dynalloc_analysis(
 
 /// Compute the LPC coefficients using a least-squares fit for both forward and backward
 /// prediction. `x[0..len]`; returns 1 on failure (`lpc` untouched), else 0.
-// IX-EASY: `lpc` has constant indices on a `[f32; 2]`; `x` loops re-slice to `len` (offsets up to `2 * delay`).
 pub fn tone_lpc(x: &[f32], len: i32, delay: i32, lpc: &mut [f32; 2]) -> i32 {
     let mut r00: f32 = 0.0;
     let mut r01: f32 = 0.0;
@@ -979,24 +988,30 @@ pub fn tone_lpc(x: &[f32], len: i32, delay: i32, lpc: &mut [f32; 2]) -> i32 {
     debug_assert!(len > 2 * delay);
     let (len, delay) = (len as usize, delay as usize);
     /* Compute correlations as if using the forward prediction covariance method. */
-    for i in 0..len - 2 * delay {
-        r00 += x.at(i) * x.at(i);
-        r01 += x.at(i) * x.at(i + delay);
-        r02 += x.at(i) * x.at(i + 2 * delay);
+    let x = &x[..len];
+    let n = len - 2 * delay;
+    for ((&a, &b), &c) in x[..n].iter().zip(&x[delay..delay + n]).zip(&x[2 * delay..]) {
+        r00 += a * a;
+        r01 += a * b;
+        r02 += a * c;
     }
+    let head0 = &x[..delay];
+    let head1 = &x[delay..2 * delay];
+    let tail0 = &x[len - 2 * delay..len - delay];
+    let tail1 = &x[len - delay..];
     edges = 0.0;
-    for i in 0..delay {
-        edges += x.at(len + i - 2 * delay) * x.at(len + i - 2 * delay) - x.at(i) * x.at(i);
+    for (&t, &h) in tail0.iter().zip(head0) {
+        edges += t * t - h * h;
     }
     r11 = r00 + edges;
     edges = 0.0;
-    for i in 0..delay {
-        edges += x.at(len + i - delay) * x.at(len + i - delay) - x.at(i + delay) * x.at(i + delay);
+    for (&t, &h) in tail1.iter().zip(head1) {
+        edges += t * t - h * h;
     }
     r22 = r11 + edges;
     edges = 0.0;
-    for i in 0..delay {
-        edges += x.at(len + i - 2 * delay) * x.at(len + i - delay) - x.at(i) * x.at(i + delay);
+    for ((&t0, &t1), (&h0, &h1)) in tail0.iter().zip(tail1).zip(head0.iter().zip(head1)) {
+        edges += t0 * t1 - h0 * h1;
     }
     r12 = r01 + edges;
     /* Reverse and sum to get the backward contribution. */
@@ -1019,19 +1034,19 @@ pub fn tone_lpc(x: &[f32], len: i32, delay: i32, lpc: &mut [f32; 2]) -> i32 {
         }
         let num1: f32 = r02 * r11 - r01 * r12;
         if num1 >= den {
-            *lpc.at_mut(1) = 1.0;
+            lpc[1] = 1.0;
         } else if num1 <= -den {
-            *lpc.at_mut(1) = -1.0;
+            lpc[1] = -1.0;
         } else {
-            *lpc.at_mut(1) = num1 / den;
+            lpc[1] = num1 / den;
         }
         let num0: f32 = r00 * r12 - r02 * r01;
         if 0.5 * num0 >= den {
-            *lpc.at_mut(0) = 1.999999;
+            lpc[0] = 1.999999;
         } else if 0.5 * num0 <= -den {
-            *lpc.at_mut(0) = -1.999999;
+            lpc[0] = -1.999999;
         } else {
-            *lpc.at_mut(0) = num0 / den;
+            lpc[0] = num0 / den;
         }
     }
     0
@@ -1040,7 +1055,6 @@ pub fn tone_lpc(x: &[f32], len: i32, delay: i32, lpc: &mut [f32; 2]) -> i32 {
 /// Detects pure of nearly pure tones so we can prevent them from causing problems with the
 /// encoder. `in_` holds `CC` channels of `N` samples (`in_[c*N + i]`, the caller passes `N+overlap`).
 /// Returns the tone frequency (radians/sample, or -1) and writes `*toneishness`.
-// IX-EASY: `lpc.at(0|1)` on a `[f32; 2]`; the `x`/`in_` loops re-slice to `N`.
 pub fn tone_detect(in_: &[f32], CC: i32, N: i32, toneishness: &mut f32) -> f32 {
     let mut delay: i32 = 1;
     let mut lpc = [0.0f32; 2];
@@ -1050,24 +1064,27 @@ pub fn tone_detect(in_: &[f32], CC: i32, N: i32, toneishness: &mut f32) -> f32 {
     let nu = N as usize;
     /* Shift by SIG_SHIFT+2 (+3 for stereo) to account for HF gain of the preemphasis filter
     (all shifts are the identity in the float build). */
+    debug_assert!(in_.len() >= CC as usize * nu);
     if CC == 2 {
-        for i in 0..nu {
-            *x.at_mut(i) = in_.at(i) + in_.at(i + nu);
+        for ((o, &a), &b) in x.iter_mut().zip(in_).zip(in_.iter().skip(nu)) {
+            *o = a + b;
         }
     } else {
-        x.rg_mut(..nu).copy_from_slice(in_.rg(..nu));
+        for (o, &a) in x.iter_mut().zip(in_) {
+            *o = a;
+        }
     }
     let mut fail = tone_lpc(x, N, delay, &mut lpc);
     /* If our LPC filter resonates too close to DC, retry the analysis with down-sampling. */
-    while delay <= 16 && (fail != 0 || (lpc.at(0) > 1.0 && lpc.at(1) < 0.0)) {
+    while delay <= 16 && (fail != 0 || (lpc[0] > 1.0 && lpc[1] < 0.0)) {
         delay *= 2;
         fail = tone_lpc(x, N, delay, &mut lpc);
     }
     /* Check that our filter has complex roots. (3.999999 is a double literal: double arithmetic.) */
-    if fail == 0 && (lpc.at(0) * lpc.at(0)) as f64 + 3.999999 * (lpc.at(1) as f64) < 0.0 {
+    if fail == 0 && (lpc[0] * lpc[0]) as f64 + 3.999999 * (lpc[1] as f64) < 0.0 {
         /* Squared radius of the poles. */
         *toneishness = -lpc[1];
-        freq = (crate::celt::mathops::acos64((0.5f32 * lpc.at(0)) as f64) / delay as f64) as f32;
+        freq = (crate::celt::mathops::acos64((0.5f32 * lpc[0]) as f64) / delay as f64) as f32;
     } else {
         freq = -1.0;
         *toneishness = 0.0;
