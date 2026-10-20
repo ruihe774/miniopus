@@ -377,10 +377,6 @@ pub fn pitch_downsample_factor2(hist: &[f32], new: &[f32], new_off: usize, new_s
 }
 
 /// Reads `x_lp[0..len/2]`, `y[0..len/2 + max_pitch/2]` (and the decimated copies of them).
-// IX-HARD: the strided copies `x_lp4[j] = x_lp[2 * j]`, `y_lp4[j] = y[2 * j]`, `y.rg(i..)` and the
-// `xcorr.at(b0 - 1 ..= b0 + 1)` window. Converted (zip + `step_by(2)`, `&y[i..]`, 3-element re-slice):
-// +0.5 % mono / +0.25 % stereo encode time (bench.ts), +74 B, so reverted; `best_pitch` and the
-// `xcorr` loop are plain.
 pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &mut i32) {
     let mut best_pitch: [i32; 2] = [0, 0];
     let st = stack::save();
@@ -393,12 +389,14 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
     let y_lp4 = st.alloc::<f32>((lag >> 2) as usize);
     let xcorr = st.alloc::<f32>((max_pitch >> 1) as usize);
 
-    /* Downsample by 2 again */
-    for j in 0..(len >> 2) as usize {
-        *x_lp4.at_mut(j) = x_lp.at(2 * j);
+    /* Downsample by 2 again: the even samples, from pairs (one length check per copy, none in the loops) */
+    let (x_pairs, _) = x_lp.as_chunks::<2>();
+    for (d, p) in x_lp4.iter_mut().zip(&x_pairs[..(len >> 2) as usize]) {
+        *d = p[0];
     }
-    for j in 0..(lag >> 2) as usize {
-        *y_lp4.at_mut(j) = y.at(2 * j);
+    let (y_pairs, _) = y.as_chunks::<2>();
+    for (d, p) in y_lp4.iter_mut().zip(&y_pairs[..(lag >> 2) as usize]) {
+        *d = p[0];
     }
 
     /* Coarse search with 4x decimation */
@@ -413,7 +411,7 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
         if (i - 2 * best_pitch[0]).abs() > 2 && (i - 2 * best_pitch[1]).abs() > 2 {
             continue;
         }
-        let sum = celt_inner_prod(x_lp, y.rg(i as usize..), len >> 1);
+        let sum = celt_inner_prod(x_lp, &y[i as usize..], len >> 1);
         *xc = MAX32(-1.0, sum);
     }
     find_best_pitch(xcorr, y, len >> 1, max_pitch >> 1, &mut best_pitch);
@@ -422,9 +420,7 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
     let offset: i32;
     if best_pitch[0] > 0 && best_pitch[0] < (max_pitch >> 1) - 1 {
         let b0 = best_pitch[0] as usize;
-        let a = xcorr.at(b0 - 1);
-        let b = xcorr.at(b0);
-        let c = xcorr.at(b0 + 1);
+        let &[a, b, c] = xcorr[b0 - 1..].first_chunk::<3>().unwrap();
         if (c - a) > 0.7 * (b - a) {
             offset = 1;
         } else if (a - c) > 0.7 * (b - c) {
