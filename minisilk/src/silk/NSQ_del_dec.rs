@@ -246,10 +246,10 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
         let Gain_Q10 = silk_RSHIFT(Gain_Q16, 6);
 
         for j in 0..predictLPCOrder as usize {
-            a_Q12_sx[j] = i32x4_splat(a_Q12[j] as i32);
+            *a_Q12_sx.at_mut(j) = i32x4_splat(a_Q12.at(j) as i32);
         }
         for j in 0..shapingLPCOrder as usize {
-            AR_shp_sx[j] = i32x4_splat(AR_shp_Q13[j] as i32);
+            *AR_shp_sx.at_mut(j) = i32x4_splat(AR_shp_Q13.at(j) as i32);
         }
         let warp_hi = i32x4_splat(((warping_Q16 as u32) << 16) as i32);
         let warp_lo = i32x4_splat(warping_Q16 & 0xFFFF);
@@ -287,11 +287,11 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
                 /* Unrolled loop */
                 /* Avoids introducing a bias because silk_SMLAWB() always rounds to -inf */
                 LTP_pred_Q14 = 2;
-                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr, b_Q14[0] as i32);
-                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr.sub(1), b_Q14[1] as i32);
-                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr.sub(2), b_Q14[2] as i32);
-                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr.sub(3), b_Q14[3] as i32);
-                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr.sub(4), b_Q14[4] as i32);
+                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr, b_Q14.at(0) as i32);
+                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr.sub(1), b_Q14.at(1) as i32);
+                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr.sub(2), b_Q14.at(2) as i32);
+                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr.sub(3), b_Q14.at(3) as i32);
+                LTP_pred_Q14 = silk_SMLAWB(LTP_pred_Q14, *pred_lag_ptr.sub(4), b_Q14.at(4) as i32);
                 LTP_pred_Q14 = silk_LSHIFT(LTP_pred_Q14, 1); /* Q13 -> Q14 */
                 pred_lag_ptr = pred_lag_ptr.add(1);
             } else {
@@ -313,7 +313,7 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
             Seed = i32x4_add(i32x4_mul(Seed, i32x4_splat(RAND_MULTIPLIER)), i32x4_splat(RAND_INCREMENT));
 
             /* Short-term prediction */
-            let psLPC_Q14 = |j: usize| LD(&psDelDec.sLPC_Q14[NSQ_LPC_BUF_LENGTH_ - 1 + i - j]);
+            let psLPC_Q14 = |j: usize| LD(&psDelDec.sLPC_Q14.at(NSQ_LPC_BUF_LENGTH_ - 1 + i - j));
             /* Avoids introducing a bias because silk_SMLAWB() always rounds to -inf */
             tmp1 = i32x4_add(i32x4_splat(silk_RSHIFT(predictLPCOrder, 1)), silk_SMULWB_wasm(psLPC_Q14(0), a_Q12_sx[0]));
             tmp2 = silk_SMULWB_wasm(psLPC_Q14(1), a_Q12_sx[1]);
@@ -340,30 +340,30 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
             if warped {
                 let (mut s0, mut s1): (v128, v128);
                 /* Output of lowpass section */
-                s0 = LD(&sAR2[0]);
+                s0 = LD(&sAR2.at(0));
                 tmp2 = i32x4_add(Diff_Q14, silk_SMULWB_dot_wasm(s0, warp_hi, warp_lo, warp_sx));
                 /* Output of allpass section */
-                s1 = LD(&sAR2[1]);
+                s1 = LD(&sAR2.at(1));
                 tmp1 = i32x4_add(s0, silk_SMULWB_dot_wasm(i32x4_sub(s1, tmp2), warp_hi, warp_lo, warp_sx));
-                ST(&mut sAR2[0], tmp2);
+                ST(sAR2.at_mut(0), tmp2);
                 n_AR_Q14 = i32x4_add(i32x4_splat(silk_RSHIFT(shapingLPCOrder, 1)), silk_SMULWB_wasm(tmp2, AR_shp_sx[0]));
                 /* Loop over allpass sections */
                 let mut j = 2usize;
                 while j < shapingLPCOrder as usize {
                     /* Output of allpass section */
-                    s0 = LD(&sAR2[j]);
+                    s0 = LD(&sAR2.at(j));
                     tmp2 = i32x4_add(s1, silk_SMULWB_dot_wasm(i32x4_sub(s0, tmp1), warp_hi, warp_lo, warp_sx));
-                    ST(&mut sAR2[j - 1], tmp1);
-                    n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(tmp1, AR_shp_sx[j - 1]));
+                    ST(sAR2.at_mut(j - 1), tmp1);
+                    n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(tmp1, AR_shp_sx.at(j - 1)));
                     /* Output of allpass section */
-                    s1 = LD(&sAR2[j + 1]);
+                    s1 = LD(&sAR2.at(j + 1));
                     tmp1 = i32x4_add(s0, silk_SMULWB_dot_wasm(i32x4_sub(s1, tmp2), warp_hi, warp_lo, warp_sx));
-                    ST(&mut sAR2[j], tmp2);
-                    n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(tmp2, AR_shp_sx[j]));
+                    ST(sAR2.at_mut(j), tmp2);
+                    n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(tmp2, AR_shp_sx.at(j)));
                     j += 2;
                 }
-                ST(&mut sAR2[shapingLPCOrder as usize - 1], tmp1);
-                n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(tmp1, AR_shp_sx[shapingLPCOrder as usize - 1]));
+                ST(sAR2.at_mut(shapingLPCOrder as usize - 1), tmp1);
+                n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(tmp1, AR_shp_sx.at(shapingLPCOrder as usize - 1)));
             } else {
                 /* Without warping the allpass sections reduce to a delay line */
                 tmp1 = Diff_Q14;
@@ -371,12 +371,12 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
                 tmp2 = i32x4_splat(0);
                 let mut j = 0usize;
                 while j < shapingLPCOrder as usize {
-                    let s0 = LD(&sAR2[j]);
-                    let s1 = LD(&sAR2[j + 1]);
-                    ST(&mut sAR2[j], tmp1);
-                    ST(&mut sAR2[j + 1], s0);
-                    n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(tmp1, AR_shp_sx[j]));
-                    tmp2 = i32x4_add(tmp2, silk_SMULWB_wasm(s0, AR_shp_sx[j + 1]));
+                    let s0 = LD(&sAR2.at(j));
+                    let s1 = LD(&sAR2.at(j + 1));
+                    ST(sAR2.at_mut(j), tmp1);
+                    ST(sAR2.at_mut(j + 1), s0);
+                    n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(tmp1, AR_shp_sx.at(j)));
+                    tmp2 = i32x4_add(tmp2, silk_SMULWB_wasm(s0, AR_shp_sx.at(j + 1)));
                     tmp1 = s1;
                     j += 2;
                 }
@@ -387,7 +387,7 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
             n_AR_Q14 = i32x4_add(n_AR_Q14, silk_SMULWB_wasm(LF_AR_Q14, Tilt_sx)); /* Q12 */
             n_AR_Q14 = i32x4_shl(n_AR_Q14, 2); /* Q12 -> Q14 */
 
-            n_LF_Q14 = silk_SMULWB_wasm(LD(&psDelDec.Shape_Q14[*smpl_buf_idx as usize]), LF_shp_lo_sx); /* Q12 */
+            n_LF_Q14 = silk_SMULWB_wasm(LD(&psDelDec.Shape_Q14.at(*smpl_buf_idx as usize)), LF_shp_lo_sx); /* Q12 */
             n_LF_Q14 = i32x4_add(n_LF_Q14, silk_SMULWB_wasm(LF_AR_Q14, LF_shp_hi_sx)); /* Q12 */
             n_LF_Q14 = i32x4_shl(n_LF_Q14, 2); /* Q12 -> Q14 */
 
@@ -398,7 +398,7 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
             tmp1 = silk_SUB_SAT32_wasm(tmp2, tmp1); /* Q13 */
             tmp1 = silk_RSHIFT_ROUND_wasm(tmp1, 4); /* Q10 */
 
-            r_Q10 = i32x4_sub(i32x4_splat(x_Q10[i]), tmp1); /* residual error Q10 */
+            r_Q10 = i32x4_sub(i32x4_splat(x_Q10.at(i)), tmp1); /* residual error Q10 */
 
             /* Flip sign depending on dither */
             let sign = i32x4_shr(Seed, 31);
@@ -444,7 +444,7 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
             let mut SS0_Q_Q10 = silk_select_wasm(q1_Q10, q2_Q10, mask);
             let SS1_Q_Q10 = silk_select_wasm(q2_Q10, q1_Q10, mask);
 
-            let x_Q14 = i32x4_splat(((x_Q10[i] as u32) << 4) as i32);
+            let x_Q14 = i32x4_splat(((x_Q10.at(i) as u32) << 4) as i32);
 
             /* Update states for best quantization */
 
@@ -487,8 +487,8 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
             Winner_ind = silk_first_min_wasm(SS0_RD_Q10, MaskDelDec, &mut RDmin_Q10);
 
             /* Increase RD values of expired states */
-            tmp1 = LD(&psDelDec.RandState[last]);
-            mask = i32x4_eq(tmp1, i32x4_splat(psDelDec.RandState[last][Winner_ind]));
+            tmp1 = LD(&psDelDec.RandState.at(last));
+            mask = i32x4_eq(tmp1, i32x4_splat(psDelDec.RandState.at(last).at(Winner_ind)));
             tmp1 = v128_andnot(i32x4_splat(silk_int32_MAX >> 4), mask);
             SS0_RD_Q10 = i32x4_add(SS0_RD_Q10, tmp1);
             SS1_RD_Q10 = i32x4_add(SS1_RD_Q10, tmp1);
@@ -506,18 +506,18 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
 
                 /* Only the last ( NSQ_LPC_BUF_LENGTH - 1 ) values of sLPC_Q14 are used again */
                 for j in i + 1..i + NSQ_LPC_BUF_LENGTH_ {
-                    let v = silk_swizzle_wasm(LD(&psDelDec.sLPC_Q14[j]), sel);
-                    ST(&mut psDelDec.sLPC_Q14[j], v);
+                    let v = silk_swizzle_wasm(LD(&psDelDec.sLPC_Q14.at(j)), sel);
+                    ST(psDelDec.sLPC_Q14.at_mut(j), v);
                 }
                 for j in 0..shapingLPCOrder as usize {
-                    let v = silk_swizzle_wasm(LD(&psDelDec.sAR2_Q14[j]), sel);
-                    ST(&mut psDelDec.sAR2_Q14[j], v);
+                    let v = silk_swizzle_wasm(LD(&psDelDec.sAR2_Q14.at(j)), sel);
+                    ST(psDelDec.sAR2_Q14.at_mut(j), v);
                 }
                 /* RandState, Q_Q10, Xq_Q14, Pred_Q15 and Shape_Q14 are mostly read
                    as scalars later, so copy them lane by lane */
                 let ptr = psDelDec.RandState.as_mut_ptr();
                 for j in 0..5 * DECISION_DELAY_ {
-                    (*ptr.add(j))[RDmax_ind] = (*ptr.add(j))[RDmin_ind];
+                    *(*ptr.add(j)).at_mut(RDmax_ind) = (*ptr.add(j)).at(RDmin_ind);
                 }
                 Seed = silk_swizzle_wasm(Seed, sel);
                 let v = silk_swizzle_wasm(LD(&psDelDec.SeedInit), sel);
@@ -538,13 +538,13 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
             /* Write samples from winner to output and long-term filter states */
             if subfr > 0 || i as i32 >= decisionDelay {
                 let o = i as isize - decisionDelay as isize;
-                *pulses.offset(o) = silk_RSHIFT_ROUND(psDelDec.Q_Q10[last][Winner_ind], 10) as i8;
+                *pulses.offset(o) = silk_RSHIFT_ROUND(psDelDec.Q_Q10.at(last).at(Winner_ind), 10) as i8;
                 *xq.offset(o) = silk_SAT16(silk_RSHIFT_ROUND(
-                    silk_SMULWW(psDelDec.Xq_Q14[last][Winner_ind], delayedGain_Q10[last]),
+                    silk_SMULWW(psDelDec.Xq_Q14.at(last).at(Winner_ind), delayedGain_Q10.at(last)),
                     8,
                 )) as i16;
-                *sLTP_shp.add((NSQ.sLTP_shp_buf_idx - decisionDelay) as usize) = psDelDec.Shape_Q14[last][Winner_ind];
-                *sLTP_Q15p.add((NSQ.sLTP_buf_idx - decisionDelay) as usize) = psDelDec.Pred_Q15[last][Winner_ind];
+                *sLTP_shp.add((NSQ.sLTP_shp_buf_idx - decisionDelay) as usize) = psDelDec.Shape_Q14.at(last).at(Winner_ind);
+                *sLTP_Q15p.add((NSQ.sLTP_buf_idx - decisionDelay) as usize) = psDelDec.Pred_Q15.at(last).at(Winner_ind);
             }
             NSQ.sLTP_shp_buf_idx += 1;
             NSQ.sLTP_buf_idx += 1;
@@ -554,14 +554,14 @@ unsafe fn silk_noise_shape_quantizer_del_dec_wasm(
             Diff_Q14 = SS0_Diff_Q14;
             RD_Q10 = SS0_RD_Q10;
             let idx = *smpl_buf_idx as usize;
-            ST(&mut psDelDec.sLPC_Q14[NSQ_LPC_BUF_LENGTH_ + i], SS0_xq_Q14);
-            ST(&mut psDelDec.Xq_Q14[idx], SS0_xq_Q14);
-            ST(&mut psDelDec.Q_Q10[idx], SS0_Q_Q10);
-            ST(&mut psDelDec.Pred_Q15[idx], i32x4_shl(SS0_LPC_exc_Q14, 1));
-            ST(&mut psDelDec.Shape_Q14[idx], SS0_sLTP_shp_Q14);
+            ST(psDelDec.sLPC_Q14.at_mut(NSQ_LPC_BUF_LENGTH_ + i), SS0_xq_Q14);
+            ST(psDelDec.Xq_Q14.at_mut(idx), SS0_xq_Q14);
+            ST(psDelDec.Q_Q10.at_mut(idx), SS0_Q_Q10);
+            ST(psDelDec.Pred_Q15.at_mut(idx), i32x4_shl(SS0_LPC_exc_Q14, 1));
+            ST(psDelDec.Shape_Q14.at_mut(idx), SS0_sLTP_shp_Q14);
             Seed = i32x4_add(Seed, silk_RSHIFT_ROUND_wasm(SS0_Q_Q10, 10));
-            ST(&mut psDelDec.RandState[idx], Seed);
-            delayedGain_Q10[idx] = Gain_Q10;
+            ST(psDelDec.RandState.at_mut(idx), Seed);
+            *delayedGain_Q10.at_mut(idx) = Gain_Q10;
         }
         ST(&mut psDelDec.Seed, Seed);
         ST(&mut psDelDec.LF_AR_Q14, LF_AR_Q14);
@@ -601,10 +601,10 @@ unsafe fn silk_copy_winner_state_wasm(
             }
             let last = last_smple_idx as usize;
             let o = (i - decisionDelay) as isize;
-            *pulses.offset(o) = silk_RSHIFT_ROUND(psDelDec.Q_Q10[last][Winner_ind], 10) as i8;
-            NSQ.xq[(pxq_off as isize + o) as usize] =
-                silk_SAT16(silk_RSHIFT_ROUND(silk_SMULWW(psDelDec.Xq_Q14[last][Winner_ind], gain), shift)) as i16;
-            NSQ.sLTP_shp_Q14[(NSQ.sLTP_shp_buf_idx - decisionDelay + i) as usize] = psDelDec.Shape_Q14[last][Winner_ind];
+            *pulses.offset(o) = silk_RSHIFT_ROUND(psDelDec.Q_Q10.at(last).at(Winner_ind), 10) as i8;
+            *NSQ.xq.at_mut((pxq_off as isize + o) as usize) =
+                silk_SAT16(silk_RSHIFT_ROUND(silk_SMULWW(psDelDec.Xq_Q14.at(last).at(Winner_ind), gain), shift)) as i16;
+            *NSQ.sLTP_shp_Q14.at_mut((NSQ.sLTP_shp_buf_idx - decisionDelay + i) as usize) = psDelDec.Shape_Q14.at(last).at(Winner_ind);
         }
     }
 }
@@ -679,15 +679,15 @@ pub unsafe fn silk_NSQ_del_dec(
         ST(&mut psDelDec.SeedInit, t);
         ST(&mut psDelDec.LF_AR_Q14, i32x4_splat(NSQ.sLF_AR_shp_Q14));
         ST(&mut psDelDec.Diff_Q14, i32x4_splat(NSQ.sDiff_shp_Q14));
-        ST(&mut psDelDec.Shape_Q14[0], i32x4_splat(NSQ.sLTP_shp_Q14[ltp_mem_length as usize - 1]));
+        ST(psDelDec.Shape_Q14.at_mut(0), i32x4_splat(NSQ.sLTP_shp_Q14.at(ltp_mem_length as usize - 1)));
         for i in 0..NSQ_LPC_BUF_LENGTH_ {
-            ST(&mut psDelDec.sLPC_Q14[i], i32x4_splat(NSQ.sLPC_Q14[i]));
+            ST(psDelDec.sLPC_Q14.at_mut(i), i32x4_splat(NSQ.sLPC_Q14.at(i)));
         }
         for i in 0..MAX_SHAPE_LPC_ORDER_ {
-            ST(&mut psDelDec.sAR2_Q14[i], i32x4_splat(NSQ.sAR2_Q14[i]));
+            ST(psDelDec.sAR2_Q14.at_mut(i), i32x4_splat(NSQ.sAR2_Q14.at(i)));
         }
 
-        let offset_Q10 = silk_Quantization_Offsets_Q10[(signalType >> 1) as usize][quantOffsetType as usize] as i32;
+        let offset_Q10 = silk_Quantization_Offsets_Q10.at((signalType >> 1) as usize).at(quantOffsetType as usize) as i32;
         smpl_buf_idx = 0; /* index of oldest samples */
 
         decisionDelay = silk_min_int(DECISION_DELAY, subfr_length);
@@ -695,7 +695,7 @@ pub unsafe fn silk_NSQ_del_dec(
         /* For voiced frames limit the decision delay to lower than the pitch lag */
         if signalType == TYPE_VOICED {
             for k in 0..nb_subfr as usize {
-                decisionDelay = silk_min_int(decisionDelay, pitchL[k] - LTP_ORDER / 2 - 1);
+                decisionDelay = silk_min_int(decisionDelay, pitchL.at(k) - LTP_ORDER / 2 - 1);
             }
         } else if lag > 0 {
             decisionDelay = silk_min_int(decisionDelay, lag - LTP_ORDER / 2 - 1);
@@ -714,19 +714,19 @@ pub unsafe fn silk_NSQ_del_dec(
         let mut pulses = pulses;
         subfr = 0;
         for k in 0..nb_subfr as usize {
-            let A_Q12 = &PredCoef_Q12[(((k >> 1) | (1 - LSF_interpolation_flag)) * MAX_LPC_ORDER_)..][..MAX_LPC_ORDER_];
-            let B_Q14 = &LTPCoef_Q14[k * LTP_ORDER_..][..LTP_ORDER_];
-            let AR_shp_Q13 = &AR_Q13[k * MAX_SHAPE_LPC_ORDER_..][..MAX_SHAPE_LPC_ORDER_];
+            let A_Q12 = PredCoef_Q12.rg((((k >> 1) | (1 - LSF_interpolation_flag)) * MAX_LPC_ORDER_)..).rg(..MAX_LPC_ORDER_);
+            let B_Q14 = LTPCoef_Q14.rg(k * LTP_ORDER_..).rg(..LTP_ORDER_);
+            let AR_shp_Q13 = AR_Q13.rg(k * MAX_SHAPE_LPC_ORDER_..).rg(..MAX_SHAPE_LPC_ORDER_);
 
             /* Noise shape parameters */
-            debug_assert!(HarmShapeGain_Q14[k] >= 0);
-            let mut HarmShapeFIRPacked_Q14 = silk_RSHIFT(HarmShapeGain_Q14[k], 2);
-            HarmShapeFIRPacked_Q14 |= silk_LSHIFT(silk_RSHIFT(HarmShapeGain_Q14[k], 1), 16);
+            debug_assert!(HarmShapeGain_Q14.at(k) >= 0);
+            let mut HarmShapeFIRPacked_Q14 = silk_RSHIFT(HarmShapeGain_Q14.at(k), 2);
+            HarmShapeFIRPacked_Q14 |= silk_LSHIFT(silk_RSHIFT(HarmShapeGain_Q14.at(k), 1), 16);
 
             NSQ.rewhite_flag = 0;
             if signalType == TYPE_VOICED {
                 /* Voiced */
-                lag = pitchL[k];
+                lag = pitchL.at(k);
 
                 /* Re-whitening */
                 if (k as i32 & (3 - silk_LSHIFT(LSF_interpolation_flag as i32, 1))) == 0 {
@@ -746,7 +746,7 @@ pub unsafe fn silk_NSQ_del_dec(
 
                         /* Copy final part of signals from winner state to output and long-term filter states */
                         silk_copy_winner_state_wasm(
-                            &psDelDec, NSQ, pulses, pxq, smpl_buf_idx, decisionDelay, Winner_ind, Gains_Q16[1], 14,
+                            &psDelDec, NSQ, pulses, pxq, smpl_buf_idx, decisionDelay, Winner_ind, Gains_Q16.at(1), 14,
                         );
 
                         subfr = 0;
@@ -757,8 +757,8 @@ pub unsafe fn silk_NSQ_del_dec(
                     debug_assert!(start_idx > 0);
 
                     silk_LPC_analysis_filter(
-                        &mut sLTP[start_idx as usize..],
-                        &NSQ.xq[(start_idx + k as i32 * subfr_length) as usize..],
+                        sLTP.rg_mut(start_idx as usize..),
+                        NSQ.xq.rg((start_idx + k as i32 * subfr_length) as usize..),
                         A_Q12,
                         ltp_mem_length - start_idx,
                         predictLPCOrder,
@@ -774,7 +774,7 @@ pub unsafe fn silk_NSQ_del_dec(
                 ltp_mem_length,
                 NSQ,
                 &mut psDelDec,
-                &x16[x16_off..],
+                x16.rg(x16_off..),
                 &mut x_sc_Q10,
                 sLTP,
                 sLTP_Q15,
@@ -800,9 +800,9 @@ pub unsafe fn silk_NSQ_del_dec(
                 AR_shp_Q13,
                 lag,
                 HarmShapeFIRPacked_Q14,
-                Tilt_Q14[k],
-                LF_shp_Q14[k],
-                Gains_Q16[k],
+                Tilt_Q14.at(k),
+                LF_shp_Q14.at(k),
+                Gains_Q16.at(k),
                 Lambda_Q10,
                 offset_Q10,
                 subfr_length,
@@ -825,20 +825,20 @@ pub unsafe fn silk_NSQ_del_dec(
         Winner_ind = silk_first_min_wasm(LD(&psDelDec.RD_Q10), MaskDelDec, &mut RDmin_Q10);
 
         /* Copy final part of signals from winner state to output and long-term filter states */
-        (*psIndices).Seed = psDelDec.SeedInit[Winner_ind] as i8;
-        let Gain_Q10 = silk_RSHIFT32(Gains_Q16[nb_subfr as usize - 1], 6);
+        (*psIndices).Seed = psDelDec.SeedInit.at(Winner_ind) as i8;
+        let Gain_Q10 = silk_RSHIFT32(Gains_Q16.at(nb_subfr as usize - 1), 6);
         silk_copy_winner_state_wasm(&psDelDec, NSQ, pulses, pxq, smpl_buf_idx, decisionDelay, Winner_ind, Gain_Q10, 8);
         for i in 0..NSQ_LPC_BUF_LENGTH_ {
-            NSQ.sLPC_Q14[i] = psDelDec.sLPC_Q14[subfr_length as usize + i][Winner_ind];
+            *NSQ.sLPC_Q14.at_mut(i) = psDelDec.sLPC_Q14.at(subfr_length as usize + i).at(Winner_ind);
         }
         for i in 0..MAX_SHAPE_LPC_ORDER_ {
-            NSQ.sAR2_Q14[i] = psDelDec.sAR2_Q14[i][Winner_ind];
+            *NSQ.sAR2_Q14.at_mut(i) = psDelDec.sAR2_Q14.at(i).at(Winner_ind);
         }
 
         /* Update states */
-        NSQ.sLF_AR_shp_Q14 = psDelDec.LF_AR_Q14[Winner_ind];
-        NSQ.sDiff_shp_Q14 = psDelDec.Diff_Q14[Winner_ind];
-        NSQ.lagPrev = pitchL[nb_subfr as usize - 1];
+        NSQ.sLF_AR_shp_Q14 = psDelDec.LF_AR_Q14.at(Winner_ind);
+        NSQ.sDiff_shp_Q14 = psDelDec.Diff_Q14.at(Winner_ind);
+        NSQ.lagPrev = pitchL.at(nb_subfr as usize - 1);
 
         /* Save quantized speech signal */
         NSQ.xq.copy_within(frame_length as usize..(frame_length + ltp_mem_length) as usize, 0);
@@ -871,15 +871,15 @@ unsafe fn silk_nsq_del_dec_scale_states_wasm(
         let mut i: i32;
         let mut g: v128;
 
-        let lag = pitchL[subfr];
-        let mut inv_gain_Q31 = silk_INVERSE32_varQ(silk_max!(Gains_Q16[subfr], 1), 47);
+        let lag = pitchL.at(subfr);
+        let mut inv_gain_Q31 = silk_INVERSE32_varQ(silk_max!(Gains_Q16.at(subfr), 1), 47);
         debug_assert!(inv_gain_Q31 != 0);
 
         /* Scale input */
         let inv_gain_Q26 = silk_RSHIFT_ROUND(inv_gain_Q31, 5);
         g = i32x4_splat(inv_gain_Q26);
-        let x16p = x16[..subfr_length as usize].as_ptr();
-        let x_sc = x_sc_Q10[..subfr_length as usize].as_mut_ptr();
+        let x16p = x16.rg(..subfr_length as usize).as_ptr();
+        let x_sc = x_sc_Q10.rg_mut(..subfr_length as usize).as_mut_ptr();
         i = 0;
         while i < subfr_length - 3 {
             v128_store(x_sc.add(i as usize) as *mut v128, silk_SMULWW_wasm(i32x4_load_extend_i16x4(x16p.add(i as usize)), g));
@@ -918,8 +918,8 @@ unsafe fn silk_nsq_del_dec_scale_states_wasm(
         }
 
         /* Adjust for changing gain */
-        if Gains_Q16[subfr] != NSQ.prev_gain_Q16 {
-            let gain_adj_Q16 = silk_DIV32_varQ(NSQ.prev_gain_Q16, Gains_Q16[subfr], 16);
+        if Gains_Q16.at(subfr) != NSQ.prev_gain_Q16 {
+            let gain_adj_Q16 = silk_DIV32_varQ(NSQ.prev_gain_Q16, Gains_Q16.at(subfr), 16);
             g = i32x4_splat(gain_adj_Q16);
 
             /* Scale long-term shaping state */
@@ -957,18 +957,18 @@ unsafe fn silk_nsq_del_dec_scale_states_wasm(
 
             /* Scale short-term prediction and shaping states */
             for i in 0..NSQ_LPC_BUF_LENGTH_ {
-                scale_row(&mut psDelDec.sLPC_Q14[i], g);
+                scale_row(psDelDec.sLPC_Q14.at_mut(i), g);
             }
             for i in 0..MAX_SHAPE_LPC_ORDER_ {
-                scale_row(&mut psDelDec.sAR2_Q14[i], g);
+                scale_row(psDelDec.sAR2_Q14.at_mut(i), g);
             }
             for i in 0..DECISION_DELAY_ {
-                scale_row(&mut psDelDec.Pred_Q15[i], g);
-                scale_row(&mut psDelDec.Shape_Q14[i], g);
+                scale_row(psDelDec.Pred_Q15.at_mut(i), g);
+                scale_row(psDelDec.Shape_Q14.at_mut(i), g);
             }
 
             /* Save inverse gain */
-            NSQ.prev_gain_Q16 = Gains_Q16[subfr];
+            NSQ.prev_gain_Q16 = Gains_Q16.at(subfr);
         }
     }
 }
