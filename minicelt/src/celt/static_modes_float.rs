@@ -3,7 +3,8 @@
 //! Also holds `eband5ms` and `band_allocation` from celt/modes.c. Float build, no
 //! ENABLE_PFA / ENABLE_QEXT / CUSTOM_MODES: only the 48 kHz / 960 mode, trimmed to what
 //! 20 ms frames use (see the generator): `mdct_twiddles960` holds the shift 0 and shift 3
-//! tables only, `cache_caps50` only the LM 3 rows (`(C-1)*nbEBands + band`).
+//! tables only, `cache_caps50` only the LM 3 rows (`(C-1)*nbEBands + band`),
+//! `cache_bits50` is zero-padded to 512 entries.
 
 use super::kiss_fft::{kiss_fft_state, kiss_twiddle_cpx};
 
@@ -62,7 +63,7 @@ pub static cache_index50: [i16; 105] = [
 ];
 
 #[rustfmt::skip]
-pub static cache_bits50: [u8; 392] = [
+pub static cache_bits50: [u8; 512] = [
     40, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
     7, 7, 7, 7, 7, 7, 7, 7, 7, 40, 15, 23, 28, 31, 34, 36, 38, 39, 41, 42, 43, 44, 45, 46, 47, 47,
     49, 50, 51, 52, 53, 54, 55, 55, 57, 58, 59, 60, 61, 62, 63, 63, 65, 66, 67, 68, 69, 70, 71, 71,
@@ -81,7 +82,10 @@ pub static cache_bits50: [u8; 392] = [
     235, 255, 7, 49, 90, 127, 160, 191, 220, 247, 6, 51, 95, 134, 170, 203, 234, 7, 47, 87, 123,
     155, 184, 212, 237, 6, 52, 97, 137, 174, 208, 240, 5, 57, 106, 151, 192, 231, 5, 59, 111, 158,
     202, 243, 5, 55, 103, 147, 187, 224, 5, 60, 113, 161, 206, 248, 4, 65, 122, 175, 224, 4, 67,
-    127, 182, 234,
+    127, 182, 234, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 #[rustfmt::skip]

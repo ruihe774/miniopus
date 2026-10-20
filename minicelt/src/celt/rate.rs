@@ -25,24 +25,24 @@ pub fn get_pulses(i: i32) -> i32 {
 }
 
 /// Fixed interface (used by bands.rs).
-// IX-HARD: `cache_bits.rg(cache_index.at(..)..)` then a binary search over the cache: table-driven indices.
 pub fn bits2pulses(band: i32, LM: i32, mut bits: i32) -> i32 {
     let LM = LM + 1;
-    let cache = modes::cache_bits.rg(modes::cache_index.at((LM * modes::nbEBands + band) as usize) as usize..);
+    /* `cache_bits` is padded so that every entry has a 65-byte window (entries hold at most 40):
+       the indices below are at most 64 by construction, so they need no bounds check. */
+    let ci = modes::cache_index[(LM * modes::nbEBands + band) as usize] as usize;
+    let cache: &[u8; 65] = modes::cache_bits[ci..].first_chunk().unwrap();
+    let n = cache[0] as usize;
 
-    let mut lo = 0usize;
-    let mut hi = cache.at(0) as usize;
     bits -= 1;
-    for _ in 0..LOG_MAX_PSEUDO {
-        let mid = (lo + hi + 1) >> 1;
-        /* OPT: Make sure this is implemented with a conditional move */
-        if cache.at(mid) as i32 >= bits {
-            hi = mid;
-        } else {
-            lo = mid;
-        }
-    }
-    if bits - (if lo == 0 { -1 } else { cache.at(lo) as i32 }) <= cache.at(hi) as i32 - bits {
+    /* The binary search of rate.h (LOG_MAX_PSEUDO steps over 1..=n) as a branchless search:
+       cache[1..=n] is non-decreasing, so lo is the number of entries below bits. */
+    let step = |lo: usize, half: usize| {
+        let k = lo + half;
+        if (k <= n) & ((cache[k] as i32) < bits) { k } else { lo }
+    };
+    let lo = step(step(step(step(step(step(0, 32), 16), 8), 4), 2), 1);
+    let hi = if lo < n { lo + 1 } else { lo };
+    if bits - (if lo == 0 { -1 } else { cache[lo] as i32 }) <= cache[hi] as i32 - bits {
         lo as i32
     } else {
         hi as i32
