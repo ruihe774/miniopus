@@ -377,6 +377,10 @@ pub fn pitch_downsample_factor2(hist: &[f32], new: &[f32], new_off: usize, new_s
 }
 
 /// Reads `x_lp[0..len/2]`, `y[0..len/2 + max_pitch/2]` (and the decimated copies of them).
+// IX-HARD: the strided copies `x_lp4[j] = x_lp[2 * j]`, `y_lp4[j] = y[2 * j]`, `y.rg(i..)` and the
+// `xcorr.at(b0 - 1 ..= b0 + 1)` window. Converted (zip + `step_by(2)`, `&y[i..]`, 3-element re-slice):
+// +0.5 % mono / +0.25 % stereo encode time (bench.ts), +74 B, so reverted; `best_pitch` and the
+// `xcorr` loop are plain.
 pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &mut i32) {
     let mut best_pitch: [i32; 2] = [0, 0];
     let st = stack::save();
@@ -390,11 +394,11 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
     let xcorr = st.alloc::<f32>((max_pitch >> 1) as usize);
 
     /* Downsample by 2 again */
-    for (d, &s) in x_lp4.iter_mut().zip(x_lp.iter().step_by(2)) {
-        *d = s;
+    for j in 0..(len >> 2) as usize {
+        *x_lp4.at_mut(j) = x_lp.at(2 * j);
     }
-    for (d, &s) in y_lp4.iter_mut().zip(y.iter().step_by(2)) {
-        *d = s;
+    for j in 0..(lag >> 2) as usize {
+        *y_lp4.at_mut(j) = y.at(2 * j);
     }
 
     /* Coarse search with 4x decimation */
@@ -409,7 +413,7 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
         if (i - 2 * best_pitch[0]).abs() > 2 && (i - 2 * best_pitch[1]).abs() > 2 {
             continue;
         }
-        let sum = celt_inner_prod(x_lp, &y[i as usize..], len >> 1);
+        let sum = celt_inner_prod(x_lp, y.rg(i as usize..), len >> 1);
         *xc = MAX32(-1.0, sum);
     }
     find_best_pitch(xcorr, y, len >> 1, max_pitch >> 1, &mut best_pitch);
@@ -418,8 +422,9 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
     let offset: i32;
     if best_pitch[0] > 0 && best_pitch[0] < (max_pitch >> 1) - 1 {
         let b0 = best_pitch[0] as usize;
-        let w = &xcorr[b0 - 1..b0 + 2];
-        let (a, b, c) = (w[0], w[1], w[2]);
+        let a = xcorr.at(b0 - 1);
+        let b = xcorr.at(b0);
+        let c = xcorr.at(b0 + 1);
         if (c - a) > 0.7 * (b - a) {
             offset = 1;
         } else if (a - c) > 0.7 * (b - c) {
