@@ -375,37 +375,36 @@ pub fn compute_mdcts(shortBlocks: i32, in_: &[f32], out: &mut [f32], C: i32, CC:
 /// starting at channel `c`); `inp[0..N]` receives the pre-emphasized signal
 /// (`in+c*(N+overlap)+overlap` of the caller); `*mem` is `preemph_memE[c]`. The coefficient is
 /// `mode->preemph[0]` (`preemph[1] == 0`; `upsample` is always 1, `clip` is always set).
+// IX-MIXED: per-sample loops over `inp[..N]` / `pcmp[CC * i]`. Converted (`inp[..N]` re-slice + `step_by(CC)`
+// zip): +0.8% encode time (the strided iterator loses the scalar loop's codegen), -51 bytes; reverted.
 pub fn celt_preemphasis(pcmp: &[f32], inp: &mut [f32], N: i32, CC: i32, mem: &mut f32, need_clip: bool) {
     let coef0 = modes::preemph0;
     let mut m = *mem;
     let (N, CC) = (N as usize, CC as usize);
-    debug_assert!(N == 0 || pcmp.len() > CC * (N - 1));
-    let inp = &mut inp[..N];
-    let samples = pcmp.iter().step_by(CC);
 
     /* Fast path for the normal 48kHz case and no clipping */
     if !need_clip {
-        for (o, &p) in inp.iter_mut().zip(samples) {
-            let x = CELT_SIG_SCALE * p;
+        for i in 0..N {
+            let x = CELT_SIG_SCALE * pcmp.at(CC * i);
             /* Apply pre-emphasis */
-            *o = x - m;
+            *inp.at_mut(i) = x - m;
             m = coef0 * x;
         }
         *mem = m;
         return;
     }
 
-    for (o, &p) in inp.iter_mut().zip(samples) {
-        *o = CELT_SIG_SCALE * p;
+    for i in 0..N {
+        *inp.at_mut(i) = CELT_SIG_SCALE * pcmp.at(CC * i);
     }
     /* Clip input to avoid encoding non-portable files */
-    for o in inp.iter_mut() {
-        *o = MAX32(-65536.0, MIN32(65536.0, *o));
+    for i in 0..N {
+        *inp.at_mut(i) = MAX32(-65536.0, MIN32(65536.0, inp.at(i)));
     }
-    for o in inp.iter_mut() {
-        let x = *o;
+    for i in 0..N {
+        let x = inp.at(i);
         /* Apply pre-emphasis */
-        *o = x - m;
+        *inp.at_mut(i) = x - m;
         m = coef0 * x;
     }
     *mem = m;
