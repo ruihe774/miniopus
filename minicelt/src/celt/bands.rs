@@ -136,18 +136,17 @@ fn compute_channel_weights(mut Ex: f32, mut Ey: f32, w: &mut [f32; 2]) {
     w[1] = Ey;
 }
 
-// IX-HARD: `bandE.at(bandID)`/`at(bandID + nbEBands)`: `bandID` is the caller's band counter. The `X`/`Y`
-// loop over `N` (a re-slice to `N` would do) is left on `Ix` too, because the function keeps `Ix` for `bandE`
-// anyway; not measured.
 fn intensity_stereo(X: &mut [f32], Y: &[f32], bandE: &[f32], bandID: i32, N: i32) {
     let i = bandID as usize;
-    let left = bandE.at(i);
-    let right = bandE.at(i + modes::nbEBands as usize);
+    let left = bandE[i];
+    let right = bandE[i + modes::nbEBands as usize];
     let norm: f32 = super::arch::EPSILON + celt_sqrt(super::arch::EPSILON + left * left + right * right);
     let a1 = left / norm;
     let a2 = right / norm;
-    for j in 0..N as usize {
-        *X.at_mut(j) = a1 * X.at(j) + a2 * Y.at(j);
+    /* the callers pass X and Y with length N */
+    debug_assert!(X.len() == N as usize && Y.len() == N as usize);
+    for (x, &y) in X.iter_mut().zip(Y) {
+        *x = a1 * *x + a2 * y;
         /* Side is not encoded, no need to calculate */
     }
 }
