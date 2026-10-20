@@ -123,8 +123,8 @@ Everything is static (`no_std`, no allocator), so the linear memory is stack + d
 the stack first (overflow traps at address < 0):
 
 - Shadow stack (the Rust call stack): `wasm/build.rs` sets it to 48 KiB (default 1 MiB; the
-  `MINISILK_SHADOW_STACK` env var overrides it). Deepest use measured: 36280 bytes (release) and
-  35248 (`checked`), all builds.
+  `MINISILK_SHADOW_STACK` env var overrides it). Deepest use measured: 32432 bytes (release) and
+  36232 (`checked`), both variants.
 - Pseudostack (`src/stack.rs`, `GLOBAL_STACK_SIZE`): 5504 bytes. Measured peak 5436 bytes: the
   `ec_buf_copy` of `silk_encode_frame_FLP` (1276 with alignment) plus the `silk_NSQ` scratch (4160).
 - Encoder state 8564 bytes, I/O buffers 3196 bytes, tables ~10 KB: 2 wasm pages in total.

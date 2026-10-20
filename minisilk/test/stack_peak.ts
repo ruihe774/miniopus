@@ -10,8 +10,8 @@
 // bitrate (including the extremes, OPUS_AUTO and OPUS_BITRATE_MAX) x every complexity x DTX on/off x
 // packet loss 0/100 x i16/f32 input over the speech corpus (test/audio), synthetic voiced speech,
 // noise at several levels, a chirp, clipped squares/clicks, tones and DC, and prints the peak. The
-// pseudostack must be built larger than the peak (GLOBAL_STACK_SIZE overflow panics), so measure with
-// the default 120000 or more.
+// pseudostack overflow panics, so if a change raises the peak above GLOBAL_STACK_SIZE, raise it
+// temporarily to measure the new peak, then set it to the peak rounded up to 64.
 
 const root = new URL('../..', import.meta.url).pathname;
 const FRAME = 320;
