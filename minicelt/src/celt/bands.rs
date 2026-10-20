@@ -353,7 +353,13 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
 }
 
 // IX-HARD: `chunks_exact_mut(2 * stride)` + `split_at_mut(stride)` is check-free in the loop but converted:
-// +1.0% encode time (+124 bytes).
+// +1.0% encode time (+124 bytes). Many calls have few pairs per column (tf_analysis), so per-call and
+// per-column overhead counts. Tried, all check-free in the loop (bench.ts wasm2, sum over configs):
+// a `match stride` on 1/2/4/8 to const-generic `[[[f32; S]; 2]]` views (`as_chunks_mut`), +0.6%
+// (+560 bytes), and the same `match` around this Ix loop costs +0.6% too, so any stride dispatch is out;
+// `X[i..].iter_mut().step_by(stride)` taken in pairs, +1.0% (two end tests per pair); one loop over
+// `k += 2 * stride` with `k < n - stride` keeps the `X[k + stride]` check; a `Cell` view `a = x[..n -
+// stride]`, `b = x[stride..]` indexed by the same `k < a.len()` is check-free, +0.45% (+106 bytes).
 pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     N0 >>= 1;
     let stride = stride as usize;
