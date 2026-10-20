@@ -133,7 +133,6 @@ impl CELTEncoder {
 /// celt_encoder_init(st, 48000, channels) = opus_custom_encoder_init_arch(st, mode48000_960_120,
 /// channels) with the OPUS_RESET_STATE of its end. `st` is the all-zero state (the Opus layer
 /// clears it first) and `channels` is 1 or 2.
-// IX-EASY: one loop over `channels * nbEBands`; re-slice the state arrays to that length.
 pub fn celt_encoder_init(st: &mut CELTEncoder, channels: i32) {
     st.channels = channels;
     st.stream_channels = channels;
@@ -146,9 +145,13 @@ pub fn celt_encoder_init(st: &mut CELTEncoder, channels: i32) {
     st.lsb_depth = 24;
 
     /* celt_encoder_reset_state(): everything from rng on is zero already, except: */
-    for i in 0..(channels * modes::nbEBands) as usize {
-        *st.oldLogE2.at_mut(i) = -28.0f32;
-        *st.oldLogE.at_mut(i) = -28.0f32;
+    let n = (channels * modes::nbEBands) as usize;
+    debug_assert!(n <= st.oldLogE.len() && n <= st.oldLogE2.len());
+    for v in st.oldLogE2.iter_mut().take(n) {
+        *v = -28.0f32;
+    }
+    for v in st.oldLogE.iter_mut().take(n) {
+        *v = -28.0f32;
     }
     st.delayedIntra = 1.0;
     st.spread_decision = SPREAD_NORMAL;
@@ -298,7 +301,8 @@ pub fn transient_analysis(
 
 /// Looks for sudden increases of energy to decide whether we need to patch
 /// the transient decision. `newE`/`oldE` are the band log energies (`C` channels of `nbEBands`).
-// IX-EASY: loops over `start..end` on `newE`/`oldE`/`spread_old`; re-slice to `end` (and `end + nb`).
+// IX-MIXED: tried re-slicing `spread_old`/`oldE`/`newE` to `end`: +236 bytes, +7 traps. The `spread_old[i - 1]`
+// / `[i + 1]` recurrences over the runtime `start..end` keep their checks, so the re-slices only add some.
 pub fn patch_transient_decision(newE: &[f32], oldE: &[f32], nbEBands: i32, start: i32, end: i32, C: i32) -> i32 {
     let mut mean_diff: f32 = 0.0;
     let mut spread_old = [0.0f32; 26];
@@ -335,7 +339,6 @@ pub fn patch_transient_decision(newE: &[f32], oldE: &[f32], nbEBands: i32, start
 /// Apply window and compute the MDCT for all sub-frames and all channels in a frame.
 /// `in_` is the whole `in` buffer (`CC*(B*N+overlap)` samples, channel `c` at `c*(B*N+overlap)`),
 /// `out` the `C*B*N` coefficients. (`upsample` is always 1, LM is 3.)
-// IX-EASY: `out[..2 * B * N]` re-slice, then a plain loop.
 pub fn compute_mdcts(shortBlocks: i32, in_: &[f32], out: &mut [f32], C: i32, CC: i32) {
     let overlap = modes::overlap;
     let N: i32;
@@ -357,8 +360,12 @@ pub fn compute_mdcts(shortBlocks: i32, in_: &[f32], out: &mut [f32], C: i32, CC:
         }
     }
     if CC == 2 && C == 1 {
-        for i in 0..(B * N) as usize {
-            *out.at_mut(i) = 0.5 * out.at(i) + 0.5 * out.at((B * N) as usize + i);
+        let n = (B * N) as usize;
+        debug_assert!(out.len() >= 2 * n);
+        if let Some((lo, hi)) = out.split_at_mut_checked(n) {
+            for (l, &h) in lo.iter_mut().zip(hi.iter()) {
+                *l = 0.5 * *l + 0.5 * h;
+            }
         }
     }
 }
@@ -367,41 +374,44 @@ pub fn compute_mdcts(shortBlocks: i32, in_: &[f32], out: &mut [f32], C: i32, CC:
 /// starting at channel `c`); `inp[0..N]` receives the pre-emphasized signal
 /// (`in+c*(N+overlap)+overlap` of the caller); `*mem` is `preemph_memE[c]`. The coefficient is
 /// `mode->preemph[0]` (`preemph[1] == 0`; `upsample` is always 1, `clip` is always set).
-// IX-EASY: `inp[..N]` re-slice and `pcmp.iter().step_by(CC)`.
 pub fn celt_preemphasis(pcmp: &[f32], inp: &mut [f32], N: i32, CC: i32, mem: &mut f32, need_clip: bool) {
     let coef0 = modes::preemph0;
     let mut m = *mem;
     let (N, CC) = (N as usize, CC as usize);
+    debug_assert!(N == 0 || pcmp.len() > CC * (N - 1));
+    let inp = &mut inp[..N];
+    let samples = pcmp.iter().step_by(CC);
 
     /* Fast path for the normal 48kHz case and no clipping */
     if !need_clip {
-        for i in 0..N {
-            let x = CELT_SIG_SCALE * pcmp.at(CC * i);
+        for (o, &p) in inp.iter_mut().zip(samples) {
+            let x = CELT_SIG_SCALE * p;
             /* Apply pre-emphasis */
-            *inp.at_mut(i) = x - m;
+            *o = x - m;
             m = coef0 * x;
         }
         *mem = m;
         return;
     }
 
-    for i in 0..N {
-        *inp.at_mut(i) = CELT_SIG_SCALE * pcmp.at(CC * i);
+    for (o, &p) in inp.iter_mut().zip(samples) {
+        *o = CELT_SIG_SCALE * p;
     }
     /* Clip input to avoid encoding non-portable files */
-    for i in 0..N {
-        *inp.at_mut(i) = MAX32(-65536.0, MIN32(65536.0, inp.at(i)));
+    for o in inp.iter_mut() {
+        *o = MAX32(-65536.0, MIN32(65536.0, *o));
     }
-    for i in 0..N {
-        let x = inp.at(i);
+    for o in inp.iter_mut() {
+        let x = *o;
         /* Apply pre-emphasis */
-        *inp.at_mut(i) = x - m;
+        *o = x - m;
         m = coef0 * x;
     }
     *mem = m;
 }
 
-// IX-EASY: sum over `tmp[..N]`.
+// IX-MIXED: `tmp[..N]` is one check (+1 trap), and `tmp.iter().take(N)` drops it but costs +125 bytes
+// (the sum is no longer unrolled the same way); neither beats `Ix`.
 pub fn l1_metric(tmp: &[f32], N: i32, lm: i32, bias: f32) -> f32 {
     let mut L1: f32 = 0.0;
     for i in 0..N as usize {
@@ -689,23 +699,24 @@ pub fn stereo_analysis(X: &[f32], N0: i32) -> i32 {
 }
 
 /// Median of `x[0..5]`.
-// IX-EASY: constant indices 0..5; take `&[f32; 5]` or re-slice `x[..5]`.
 pub fn median_of_5(x: &[f32]) -> f32 {
+    debug_assert!(x.len() >= 5);
+    let Some(&[x0, x1, x2, x3, x4]) = x.first_chunk::<5>() else { return 0.0 };
     let (mut t0, mut t1, t2, mut t3, mut t4): (f32, f32, f32, f32, f32);
-    t2 = x.at(2);
-    if x.at(0) > x.at(1) {
-        t0 = x.at(1);
-        t1 = x.at(0);
+    t2 = x2;
+    if x0 > x1 {
+        t0 = x1;
+        t1 = x0;
     } else {
-        t0 = x.at(0);
-        t1 = x.at(1);
+        t0 = x0;
+        t1 = x1;
     }
-    if x.at(3) > x.at(4) {
-        t3 = x.at(4);
-        t4 = x.at(3);
+    if x3 > x4 {
+        t3 = x4;
+        t4 = x3;
     } else {
-        t3 = x.at(3);
-        t4 = x.at(4);
+        t3 = x3;
+        t4 = x4;
     }
     if t0 > t3 {
         core::mem::swap(&mut t0, &mut t3);
@@ -727,17 +738,17 @@ pub fn median_of_5(x: &[f32]) -> f32 {
 }
 
 /// Median of `x[0..3]`.
-// IX-EASY: constant indices 0..3; take `&[f32; 3]` or re-slice `x[..3]`.
 pub fn median_of_3(x: &[f32]) -> f32 {
+    debug_assert!(x.len() >= 3);
+    let Some(&[x0, x1, t2]) = x.first_chunk::<3>() else { return 0.0 };
     let (t0, t1): (f32, f32);
-    if x.at(0) > x.at(1) {
-        t0 = x.at(1);
-        t1 = x.at(0);
+    if x0 > x1 {
+        t0 = x1;
+        t1 = x0;
     } else {
-        t0 = x.at(0);
-        t1 = x.at(1);
+        t0 = x0;
+        t1 = x1;
     }
-    let t2 = x.at(2);
     if t1 < t2 {
         t1
     } else if t0 < t2 {
@@ -752,8 +763,9 @@ pub fn median_of_3(x: &[f32]) -> f32 {
 /// Dropped parameters: `oldBandE` (only used for `LM == 0`), `vbr` (always 1: CBR removed),
 /// `lfe`, `surround_dynalloc` (all-zero without energy mask, folded into a `MAXG(.., 0)`),
 /// `analysis`, `qext_scale`.
-// IX-EASY: every site is a loop over `0..endu` (or `c * nb + i`) on band arrays of length `nb`/`C * nb`;
-// re-slice them to `endu` (per channel) up front.
+// IX-MIXED: tried re-slicing everything to `endu`/`start..endu` (zip/iter_mut where possible): +179 bytes,
+// +6 traps. The `f[i - 1]`/`f[i + 1]` recurrences, the `median_of_5(&bandLogE3[i - 2..])` windows and the
+// `eBands[i + 1]` reads over the runtime `start..endu` keep their checks.
 pub fn dynalloc_analysis(
     bandLogE: &[f32],
     bandLogE2: &[f32],
@@ -967,7 +979,8 @@ pub fn dynalloc_analysis(
 
 /// Compute the LPC coefficients using a least-squares fit for both forward and backward
 /// prediction. `x[0..len]`; returns 1 on failure (`lpc` untouched), else 0.
-// IX-EASY: `lpc` has constant indices on a `[f32; 2]`; `x` loops re-slice to `len` (offsets up to `2 * delay`).
+// IX-MIXED: `lpc` is a `[f32; 2]` (constant indices, already unchecked); the `x` loops at offsets `delay` and
+// `2 * delay` cost +138 bytes/+3 traps with sub-slices and +496 bytes with `iter().skip(..).take(..)`.
 pub fn tone_lpc(x: &[f32], len: i32, delay: i32, lpc: &mut [f32; 2]) -> i32 {
     let mut r00: f32 = 0.0;
     let mut r01: f32 = 0.0;
@@ -1040,7 +1053,6 @@ pub fn tone_lpc(x: &[f32], len: i32, delay: i32, lpc: &mut [f32; 2]) -> i32 {
 /// Detects pure of nearly pure tones so we can prevent them from causing problems with the
 /// encoder. `in_` holds `CC` channels of `N` samples (`in_[c*N + i]`, the caller passes `N+overlap`).
 /// Returns the tone frequency (radians/sample, or -1) and writes `*toneishness`.
-// IX-EASY: `lpc.at(0|1)` on a `[f32; 2]`; the `x`/`in_` loops re-slice to `N`.
 pub fn tone_detect(in_: &[f32], CC: i32, N: i32, toneishness: &mut f32) -> f32 {
     let mut delay: i32 = 1;
     let mut lpc = [0.0f32; 2];
@@ -1050,24 +1062,27 @@ pub fn tone_detect(in_: &[f32], CC: i32, N: i32, toneishness: &mut f32) -> f32 {
     let nu = N as usize;
     /* Shift by SIG_SHIFT+2 (+3 for stereo) to account for HF gain of the preemphasis filter
     (all shifts are the identity in the float build). */
+    debug_assert!(in_.len() >= CC as usize * nu);
     if CC == 2 {
-        for i in 0..nu {
-            *x.at_mut(i) = in_.at(i) + in_.at(i + nu);
+        for ((o, &a), &b) in x.iter_mut().zip(in_).zip(in_.iter().skip(nu)) {
+            *o = a + b;
         }
     } else {
-        x.rg_mut(..nu).copy_from_slice(in_.rg(..nu));
+        for (o, &a) in x.iter_mut().zip(in_) {
+            *o = a;
+        }
     }
     let mut fail = tone_lpc(x, N, delay, &mut lpc);
     /* If our LPC filter resonates too close to DC, retry the analysis with down-sampling. */
-    while delay <= 16 && (fail != 0 || (lpc.at(0) > 1.0 && lpc.at(1) < 0.0)) {
+    while delay <= 16 && (fail != 0 || (lpc[0] > 1.0 && lpc[1] < 0.0)) {
         delay *= 2;
         fail = tone_lpc(x, N, delay, &mut lpc);
     }
     /* Check that our filter has complex roots. (3.999999 is a double literal: double arithmetic.) */
-    if fail == 0 && (lpc.at(0) * lpc.at(0)) as f64 + 3.999999 * (lpc.at(1) as f64) < 0.0 {
+    if fail == 0 && (lpc[0] * lpc[0]) as f64 + 3.999999 * (lpc[1] as f64) < 0.0 {
         /* Squared radius of the poles. */
         *toneishness = -lpc[1];
-        freq = (crate::celt::mathops::acos64((0.5f32 * lpc.at(0)) as f64) / delay as f64) as f32;
+        freq = (crate::celt::mathops::acos64((0.5f32 * lpc[0]) as f64) / delay as f64) as f32;
     } else {
         freq = -1.0;
         *toneishness = 0.0;
