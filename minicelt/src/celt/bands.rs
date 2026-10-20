@@ -597,14 +597,28 @@ unsafe fn quant_band_n1(ctx: &mut band_ctx, X: *mut f32, Y: *mut f32, lowband_ou
     1
 }
 
+/// The largest pulse cache entry of band `i` at `LM` (0..=3), `cache[cache[0]]` with
+/// `cache = &cache_bits[cache_index[(LM + 1) * nbEBands + i]..]`, indexed by `LM * nbEBands + i`.
+static split_thresh: [u8; 4 * modes::nbEBands as usize] = {
+    let nb = modes::nbEBands as usize;
+    let mut t = [0u8; 4 * modes::nbEBands as usize];
+    let mut k = 0;
+    while k < t.len() {
+        let off = modes::cache_index[nb + k];
+        assert!(off >= 0);
+        let off = off as usize;
+        t[k] = modes::cache_bits[off + modes::cache_bits[off] as usize];
+        k += 1;
+    }
+    t
+};
+
 /* This function is responsible for encoding and decoding a mono partition.
 It can split the band in two and transmit the energy difference with
 the two half-bands. It can be called recursively so bands can end up being
 split in 8 parts. */
 /// # Safety
 /// `X` must be valid for `N` floats, `lowband` (if non-null) for `N` floats, not overlapping X.
-// IX-HARD: `cache_index.at(..i)`, then `cache_bits.rg(cache_off..)` and `cache.at(cache.at(0))`: indices
-// read out of tables (the pulse cache), no length to prove them against.
 unsafe fn quant_partition(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -623,12 +637,7 @@ unsafe fn quant_partition(
     let spread = ctx.spread;
 
     /* If we need 1.5 more bit than we can produce, split the band in two. */
-    let cache_off = modes::cache_index.at(((LM + 1) * modes::nbEBands + i) as usize) as i32;
-    if LM != -1 && {
-        debug_assert!(cache_off >= 0);
-        let cache = modes::cache_bits.rg(cache_off as usize..);
-        b > cache.at(cache.at(0) as usize) as i32 + 12
-    } && N > 2
+    if LM != -1 && b > split_thresh[(LM * modes::nbEBands + i) as usize] as i32 + 12 && N > 2
     {
         let mut sctx = split_ctx::default();
         let mut next_lowband2: *mut f32 = ptr::null_mut();
@@ -718,19 +727,20 @@ unsafe fn quant_partition(
                 } else {
                     if lowband.is_null() {
                         /* Noise */
-                        for j in 0..N as usize {
+                        for v in x.iter_mut() {
                             ctx.seed = celt_lcg_rand(ctx.seed);
-                            *x.at_mut(j) = ((ctx.seed as i32) >> 20) as f32;
+                            *v = ((ctx.seed as i32) >> 20) as f32;
                         }
                         cm = cm_mask;
                     } else {
                         /* Folded spectrum */
-                        for j in 0..N as usize {
+                        let lowband = unsafe { slice(lowband, N) };
+                        for (v, &l) in x.iter_mut().zip(lowband) {
                             ctx.seed = celt_lcg_rand(ctx.seed);
                             /* About 48 dB below the "normal" folding level */
                             let mut tmp: f32 = 1.0f32 / 256.0;
                             tmp = if (ctx.seed) & 0x8000 != 0 { tmp } else { -tmp };
-                            *x.at_mut(j) = unsafe { *lowband.add(j) } + tmp;
+                            *v = l + tmp;
                         }
                         cm = fill as u32;
                     }
