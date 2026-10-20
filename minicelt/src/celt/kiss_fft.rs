@@ -80,6 +80,7 @@ fn compute_bitrev_table(mut Fout: i32, f: &mut [i16], fstride: usize, factors: &
 }
 
 /// Builds the twiddle and bit-reversal tables (call once before encoding).
+// IX-EASY: constant ranges into the fixed `[kiss_twiddle_cpx; 480]` table.
 pub fn init_fft() {
     use super::static_modes_float::{fft_state48000_960_0, fft_state48000_960_3, fft_twiddles48000_960 as octant};
     // SAFETY: nothing reads the tables while they are rebuilt (init only).
@@ -168,6 +169,8 @@ fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
     }
 }
 
+// IX-MIXED: `scratch[0..6]` constants and the `m == 1` branch (`rg_mut(o..o + 4)`) are EASY; `Fout.at(fo + k * m)`
+// and `tw.at(k * fstride)` (offsets from the runtime `m`, `mm`, `fstride`) are HARD.
 fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     if m == 1 {
         /* Degenerate case where all the twiddles are 1. */
@@ -222,6 +225,8 @@ fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
     }
 }
 
+// IX-MIXED: `scratch[0..4]` constants are EASY; `Fout.at(fo + k * m)` and `tw.at(..)` (offsets from the
+// runtime `m`, `mm`, `fstride`) are HARD.
 fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let m2 = 2 * m;
@@ -265,6 +270,8 @@ fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
     }
 }
 
+// IX-MIXED: `scratch[0..13]` constants are EASY; `Fout.at(f1..f4 + u)` and `tw.at(k * u * fstride)` (offsets
+// from the runtime `m`, `mm`, `fstride`) are HARD.
 fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let mut scratch = [kiss_fft_cpx::default(); 13];
@@ -316,6 +323,8 @@ fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 }
 
 /// In-place FFT on bit-reversed input (`fft_downshift` is a no-op in the float build).
+// IX-HARD: `st.factors.at(2 * L ..)` and `fstride.at(L + 1)`: `L` is found by walking the factor table
+// until `m == 1`, so its bound is data (the table), not a length.
 pub fn opus_fft_impl(st: &kiss_fft_state, fout: &mut [kiss_fft_cpx]) {
     let mut fstride = [0i32; MAXFACTORS];
     let tw = twiddles();

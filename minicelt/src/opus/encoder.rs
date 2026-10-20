@@ -110,6 +110,7 @@ pub struct OpusEncoder {
 
 /// Float `dc_reject` (cutoff 3 Hz at 48 kHz), in place: one-pole high-pass, state in
 /// `hp_mem[0]` (and `hp_mem[2]` for stereo).
+// IX-EASY: `hp_mem` is a `[f32; 4]` with constant indices; `buf` loops via `chunks_exact_mut(2)` / `iter_mut`.
 fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
     let coef: f32 = 6.3f32 * 3.0f32 / FS as f32;
     let coef2: f32 = 1.0 - coef;
@@ -141,6 +142,7 @@ fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
 }
 
 /// Stereo width reduction, in place.
+// IX-EASY: `window.at(i)` for `i < overlap` and `buf` as `chunks_exact_mut(2)`.
 fn stereo_fade(buf: &mut [f32], g1: f32, g2: f32) {
     let overlap = modes::overlap as usize;
     let g1 = 1.0f32 - g1;
@@ -301,6 +303,8 @@ impl OpusEncoder {
     /// and must hold `channels * IN_BUF_FRAME` samples. `lsb_depth` is the depth of the
     /// source (24 for float input; 16 for `opus_encode` of 16-bit input scaled to +-1).
     /// Returns the packet length (1..=1276 bytes at `data`) or a negative Opus error code.
+    // IX-MIXED: `bandwidth_thresholds.at(2 * (bandwidth - MEDIUMBAND) (+ 1))` is HARD (`bandwidth` is decided at
+    // run time); `data.at_mut(0)` (`[u8; PACKET_SIZE_CAP]`) and `buf.rg_mut(..FRAME_SIZE * channels)` are EASY.
     pub fn encode_float(&mut self, buf: &mut [f32], data: &mut [u8; PACKET_SIZE_CAP], lsb_depth: i32) -> i32 {
         if self.channels == 0 {
             return OPUS_BAD_ARG;
@@ -417,6 +421,7 @@ impl OpusEncoder {
 
     /// `opus_encode_frame_native` for CELT-only (redundancy, celt_to_silk, prefill and to_celt
     /// are all 0).
+    // IX-EASY: `buf.rg_mut(..FRAME_SIZE * channels)` and `..2 * FRAME_SIZE`: the buffer is `IN_BUF_FRAME` samples per channel.
     fn encode_frame_native(
         &mut self,
         buf: &mut [f32],

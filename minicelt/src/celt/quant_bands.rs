@@ -53,6 +53,7 @@ pub static e_prob_model: [[u8; 42]; 2] = [
 
 pub static small_energy_icdf: [u8; 3] = [2, 1, 0];
 
+// IX-EASY: one loop over `start..end`; re-slice both arrays to `end`.
 pub fn loss_distortion(eBands: &[f32], oldEBands: &[f32], start: i32, end: i32, len: i32, C: i32) -> f32 {
     let mut dist: f32 = 0.0;
     for c in 0..C {
@@ -65,6 +66,8 @@ pub fn loss_distortion(eBands: &[f32], oldEBands: &[f32], start: i32, end: i32, 
     MIN32(200.0, dist)
 }
 
+// IX-MIXED: `eBands`/`oldEBands`/`error` at `k` and `prev.at(c)` (`c < 2`) are EASY; `prob_model.at(pi)`
+// (`pi = 2 * min(i, 20)`, a 42-element table) is provable with a `min` but not yet written that way.
 fn quant_coarse_energy_impl(
     end: i32,
     eBands: &[f32],
@@ -155,6 +158,7 @@ fn quant_coarse_energy_impl(
     badness
 }
 
+// IX-EASY: `rg(..nb)` copies between arrays of `C * nb` elements.
 pub fn quant_coarse_energy(
     end: i32,
     eBands: &[f32],
@@ -247,6 +251,7 @@ pub fn quant_coarse_energy(
     }
 }
 
+// IX-EASY: `extra_quant.at(i)` over `start..end` and `error`/`oldEBands` at `i + c * nb`; re-slice per channel.
 pub fn quant_fine_energy(
     end: i32,
     oldEBands: &mut [f32],
@@ -286,6 +291,7 @@ pub fn quant_fine_energy(
     }
 }
 
+// IX-EASY: `fine_quant`/`fine_priority` at `i` over `start..end`, `error`/`oldEBands` at `i + c * nb`; re-slice.
 pub fn quant_energy_finalise(
     end: i32,
     oldEBands: &mut [f32],
@@ -320,6 +326,7 @@ pub fn quant_energy_finalise(
 }
 
 /// (`effEnd == end` here, so the `-14` fill of the bands above effEnd never happens)
+// IX-EASY: `bandE`/`bandLogE` at `i + c * nbEBands`, `eMeans.at(i)` over `0..end`; re-slice.
 pub fn amp2Log2(end: i32, bandE: &[f32], bandLogE: &mut [f32], C: i32) {
     for c in 0..C {
         for i in 0..end {

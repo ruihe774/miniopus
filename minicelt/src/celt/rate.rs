@@ -25,6 +25,7 @@ pub fn get_pulses(i: i32) -> i32 {
 }
 
 /// Fixed interface (used by bands.rs).
+// IX-HARD: `cache_bits.rg(cache_index.at(..)..)` then a binary search over the cache: table-driven indices.
 pub fn bits2pulses(band: i32, LM: i32, mut bits: i32) -> i32 {
     let LM = LM + 1;
     let cache = modes::cache_bits.rg(modes::cache_index.at((LM * modes::nbEBands + band) as usize) as usize..);
@@ -49,6 +50,7 @@ pub fn bits2pulses(band: i32, LM: i32, mut bits: i32) -> i32 {
 }
 
 /// Fixed interface (used by bands.rs).
+// IX-HARD: `cache_bits.rg(cache_index.at(..)..)` then `cache.at(pulses)`: table-driven indices.
 pub fn pulses2bits(band: i32, LM: i32, pulses: i32) -> i32 {
     let LM = LM + 1;
     let cache = modes::cache_bits.rg(modes::cache_index.at((LM * modes::nbEBands + band) as usize) as usize..);
@@ -58,10 +60,13 @@ pub fn pulses2bits(band: i32, LM: i32, pulses: i32) -> i32 {
 const ALLOC_STEPS: i32 = 6;
 
 #[inline(always)]
+// IX-HARD: `eBands.at(i)` with `i` from the callers' band counters (`codedBands`, `j + 1`).
 fn eb(i: i32) -> i32 {
     modes::eBands.at(i as usize) as i32
 }
 
+// IX-MIXED: the `bits`/`bits1`/`bits2`/`thresh`/`cap`/`ebits`/`fine_priority` loops over `start..end` are EASY
+// (re-slice to `end`); `LOG2_FRAC_TABLE.at(j - start)` is HARD (no bound but the caller's band counts).
 fn interp_bits2pulses(
     end: i32, skip_start: i32, bits1: &[i32], bits2: &[i32], thresh: &[i32],
     cap: &[i32], mut total: i32, _balance: &mut i32, skip_rsv: i32, intensity: &mut i32,
@@ -331,6 +336,8 @@ fn interp_bits2pulses(
 /// Compute the pulse allocation, i.e. how many pulses will go in each band
 /// (always encoding; `pulses` receives the bits per band).
 /// Returns codedBands.
+// IX-MIXED: `thresh`/`trim_offset`/`offsets`/`cap`/`bits1`/`bits2` loops over `start..end` are EASY (re-slice
+// to `end`); `allocVectors.at(mid * len + j)` and `LOG2_FRAC_TABLE.at(end - start)` are HARD.
 pub fn clt_compute_allocation(
     end: i32, offsets: &[i32], cap: &[i32], alloc_trim: i32,
     intensity: &mut i32, dual_stereo: &mut i32, mut total: i32, balance: &mut i32, pulses: &mut [i32],

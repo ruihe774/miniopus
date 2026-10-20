@@ -66,6 +66,7 @@ fn CELT_PVQ_V(_n: i32, _k: i32) -> u32 {
     CELT_PVQ_U(_n, _k) + CELT_PVQ_U(_n, _k + 1)
 }
 
+// IX-EASY: `_y[.._n]` re-slice; `j` walks down from `_n - 1`.
 fn icwrs(_n: i32, _y: &[i32]) -> u32 {
     debug_assert!(_n >= 2);
     let mut j = (_n - 1) as usize;

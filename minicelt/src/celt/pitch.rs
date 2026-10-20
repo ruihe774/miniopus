@@ -99,6 +99,7 @@ unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
 }
 
 /// `xcorr[i] = sum_j _x[j] * _y[i + j]` for i in 0..max_pitch. Reads `_y[0..len + max_pitch - 1]`.
+// IX-EASY: the one site is `xcorr.at_mut(i)` in the tail loop `i < max_pitch`; re-slice `xcorr` to `max_pitch`.
 pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max_pitch: i32) {
     debug_assert!(max_pitch > 0);
     let (len, max_pitch) = (len.max(0) as usize, max_pitch.max(0) as usize);
@@ -263,6 +264,7 @@ pub unsafe fn comb_filter_const(
 }
 
 /// Finds the two best pitch candidates (by xcorr^2 / energy) into `best_pitch`.
+// IX-EASY: `best_*` are `[_; 2]` with constant indices; `xcorr[..max_pitch]` and `y[..max_pitch + len]` re-slice.
 fn find_best_pitch(xcorr: &[f32], y: &[f32], len: i32, max_pitch: i32, best_pitch: &mut [i32; 2]) {
     let (len, max_pitch) = (len as usize, max_pitch as usize);
     let mut Syy: f32 = 1.0;
@@ -375,6 +377,8 @@ pub fn pitch_downsample_factor2(hist: &[f32], new: &[f32], new_off: usize, new_s
 }
 
 /// Reads `x_lp[0..len/2]`, `y[0..len/2 + max_pitch/2]` (and the decimated copies of them).
+// IX-EASY: `x_lp4`/`y_lp4`/`xcorr` loops re-slice to their lengths; `best_pitch` is `[i32; 2]`; the
+// `xcorr.at(b0 - 1 ..= b0 + 1)` window is guarded by `0 < b0 < (max_pitch >> 1) - 1`.
 pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &mut i32) {
     let mut best_pitch: [i32; 2] = [0, 0];
     let st = stack::save();
@@ -439,6 +443,8 @@ static second_check: [i32; 16] = [0, 0, 3, 2, 3, 2, 5, 2, 3, 2, 3, 2, 5, 2, 3, 2
 
 /// `x` is the start of the buffer; C's `x += maxperiod` (halved) is applied internally, and
 /// the function reads `x[0 .. maxperiod/2 + N/2]` (no data before the buffer start).
+// IX-MIXED: `x.at(base - i)` loop and `second_check.at(k)` (`k <= 15`, 16-element table) are EASY;
+// `yy_lookup.at(T0 | T1 | T1b)` (periods searched at run time) is HARD.
 pub fn remove_doubling(
     x: &[f32],
     mut maxperiod: i32,

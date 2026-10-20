@@ -42,6 +42,7 @@ unsafe fn slice<'a>(p: *const f32, n: i32) -> &'a [f32] {
     unsafe { core::slice::from_raw_parts(p, n as usize) }
 }
 
+// IX-HARD: `thresholds`/`hysteresis` indexed by `i` and `prev - 1` (previous decision, carried state).
 pub fn hysteresis_decision(val: f32, thresholds: &[f32], hysteresis: &[f32], N: i32, prev: i32) -> i32 {
     let mut i = 0;
     while i < N {
@@ -104,6 +105,8 @@ pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], end: i32, C: i32) {
 }
 
 /// Normalise each band such that the energy is one.
+// IX-MIXED: `bandE.at(i + c * nbEBands)` is EASY (re-slice per channel); `freq`/`X` at `M * eBands[i] + j`
+// is HARD (offset from the band table).
 pub fn normalise_bands(freq: &[f32], X: &mut [f32], bandE: &[f32], end: i32, C: i32) {
     /* M == 8 */
     let M = 8;
@@ -127,6 +130,7 @@ wanted to minimize the MSE in the non-normalized domain. This roughly
 corresponds to some quick-and-dirty perceptual experiments I ran to
 measure inter-aural masking (there doesn't seem to be any published data
 on the topic). */
+// IX-EASY: constant indices 0 and 1 on a `[f32; 2]`.
 fn compute_channel_weights(mut Ex: f32, mut Ey: f32, w: &mut [f32; 2]) {
     let minE = MIN32(Ex, Ey);
     /* Adjustment to make the weights a bit more conservative. */
@@ -136,6 +140,7 @@ fn compute_channel_weights(mut Ex: f32, mut Ey: f32, w: &mut [f32; 2]) {
     *w.at_mut(1) = Ey;
 }
 
+// IX-MIXED: the `X`/`Y` loop over `N` is EASY (re-slice); `bandE.at(bandID)`/`at(bandID + nbEBands)` is HARD.
 fn intensity_stereo(X: &mut [f32], Y: &[f32], bandE: &[f32], bandID: i32, N: i32) {
     let i = bandID as usize;
     let left = bandE.at(i);
@@ -149,6 +154,7 @@ fn intensity_stereo(X: &mut [f32], Y: &[f32], bandE: &[f32], bandID: i32, N: i32
     }
 }
 
+// IX-EASY: `X[..N]`, `Y[..N]` re-slice, or zip.
 fn stereo_split(X: &mut [f32], Y: &mut [f32], N: i32) {
     for j in 0..N as usize {
         let l = 0.70710678f32 * X.at(j);
@@ -158,6 +164,7 @@ fn stereo_split(X: &mut [f32], Y: &mut [f32], N: i32) {
     }
 }
 
+// IX-EASY: `X[..N]`, `Y[..N]` re-slice, or zip.
 fn stereo_merge(X: &mut [f32], Y: &mut [f32], mid: f32, N: i32) {
     /* Compute the norm of X+Y and X-Y as |X|^2 + |Y|^2 +/- sum(xy) */
     let mut xp = celt_inner_prod(Y, X, N);
@@ -185,6 +192,8 @@ fn stereo_merge(X: &mut [f32], Y: &mut [f32], mid: f32, N: i32) {
 }
 
 /// Decide whether we should spread the pulses in the current frame
+// IX-MIXED: `tcount[0..3]` (constant) and `spread_weight.at(i)` are EASY; `eBands.at(i)` is bounded by
+// the caller's `end`, and `x.at(j)` (`X.rg(M * eBands[i] + c * N0..)`) is HARD.
 pub fn spreading_decision(
     X: &[f32],
     average: &mut i32,
@@ -291,6 +300,8 @@ static ordery_table: [i32; 30] = [
     15, 0, 8, 7, 12, 3, 11, 4, 14, 1, 9, 6, 13, 2, 10, 5,
 ];
 
+// IX-MIXED: `ordery_table.rg(stride - 2..)` is HARD (`stride` from the caller); the strided `X`/`tmp`
+// accesses (`j * stride + i < N`) are EASY with `chunks_exact(stride)` or a re-slice to `N`.
 fn deinterleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
@@ -314,6 +325,8 @@ fn deinterleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     X.rg_mut(..N).copy_from_slice(tmp);
 }
 
+// IX-MIXED: `ordery_table.rg(stride - 2..)` is HARD (`stride` from the caller); the strided `X`/`tmp`
+// accesses (`j * stride + i < N`) are EASY with `chunks_exact(stride)` or a re-slice to `N`.
 fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
@@ -336,6 +349,7 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     X.rg_mut(..N).copy_from_slice(tmp);
 }
 
+// IX-EASY: pairs `X[stride * 2 * j + i]`, `X[stride * (2 * j + 1) + i]`: `chunks_exact_mut(2 * stride)` + `split_at_mut(stride)`.
 pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     N0 >>= 1;
     let stride = stride as usize;
@@ -349,6 +363,7 @@ pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     }
 }
 
+// IX-EASY: `exp2_table8.at(qb & 7)` on an 8-element array: the mask proves it.
 fn compute_qn(N: i32, b: i32, offset: i32, pulse_cap: i32, stereo: i32) -> i32 {
     static exp2_table8: [i16; 8] = [16384, 17866, 19483, 21247, 23170, 25267, 27554, 30048];
     let mut qn: i32;
@@ -404,6 +419,7 @@ pub struct split_ctx {
 
 /// # Safety
 /// `X` and `Y` must each be valid for `N` floats and not overlap; `ctx.ec` must be valid.
+// IX-HARD: `modes::logN.at(i)`, `i` is the band index from the caller's context.
 unsafe fn compute_theta(
     ctx: &mut band_ctx,
     sctx: &mut split_ctx,
@@ -585,6 +601,8 @@ the two half-bands. It can be called recursively so bands can end up being
 split in 8 parts. */
 /// # Safety
 /// `X` must be valid for `N` floats, `lowband` (if non-null) for `N` floats, not overlapping X.
+// IX-HARD: `cache_index.at(..i)`, then `cache_bits.rg(cache_off..)` and `cache.at(cache.at(0))`: indices
+// read out of tables (the pulse cache), no length to prove them against.
 unsafe fn quant_partition(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -727,6 +745,8 @@ unsafe fn quant_partition(
 /// # Safety
 /// `X` valid for `N` floats; `lowband`, `lowband_out`, `lowband_scratch` (each nullable) valid
 /// for `N` floats; `lowband_scratch` must not overlap `X` or `lowband`.
+// IX-MIXED: `bit_interleave_table.at(fill & 0xF)` is EASY (mask); `bit_deinterleave_table.at(cm)` is HARD
+// (`cm` is a collapse mask accumulated from the coded bands); `x.at(j)` loop over `N` is EASY.
 unsafe fn quant_band(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -858,6 +878,7 @@ const MIN_STEREO_ENERGY: f32 = 1e-10;
 /* This function is responsible for encoding and decoding a band for the stereo case. */
 /// # Safety
 /// As `quant_band`, plus `Y` valid for `N` floats and disjoint from `X`.
+// IX-HARD: `ctx.bandE.at(ctx.i)` / `at(nbEBands + ctx.i)`, `ctx.i` is the band index set by the caller.
 unsafe fn quant_band_stereo(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -1005,6 +1026,8 @@ unsafe fn quant_band_stereo(
 ///
 /// `X_` and `Y_` are the two channels of the normalised spectrum (in C, `X` and `X+N` of one
 /// buffer); each must hold at least `M*eBands[end]` values. `Y_` is `None` for mono.
+// IX-MIXED: `pulses.at(i)`, `tf_res.at(i)`, `bandE.at(i)` over `start..end` are EASY (re-slice to `end`);
+// `collapse_masks.at(fold_i * C ..)` (`fold_i` from the folding search) and the `save`-buffer ranges are HARD.
 pub fn quant_all_bands(
     end: i32,
     X_: &mut [f32],

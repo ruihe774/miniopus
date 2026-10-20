@@ -36,6 +36,7 @@ fn exp_rotation1(X: &mut [f32], len: i32, stride: i32, c: f32, s: f32) {
     }
 }
 
+// IX-EASY: `SPREAD_FACTOR.at(spread - 1)` is a `match` on `spread` (1..=3); `X.rg_mut(i * len..)` is bounded by `stride * len`.
 pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, spread: i32) {
     const SPREAD_FACTOR: [i32; 3] = [15, 10, 5];
     let mut stride2: i32 = 0;
@@ -79,6 +80,7 @@ pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, 
 }
 
 /// Normalizes the decoded integer pvq codeword to unit norm.
+// IX-EASY: re-slice `X` and `iy` to `N`, or zip them.
 fn normalise_residual(iy: &[i32], X: &mut [f32], N: i32, Ryy: f32, gain: f32) {
     let t = Ryy;
     let g = celt_rsqrt_norm32(t) * gain;
@@ -87,6 +89,7 @@ fn normalise_residual(iy: &[i32], X: &mut [f32], N: i32, Ryy: f32, gain: f32) {
     }
 }
 
+// IX-EASY: `iy[..B * N0].chunks_exact(N0)`.
 fn extract_collapse_mask(iy: &[i32], N: i32, B: i32) -> u32 {
     if B <= 1 {
         return 1;
@@ -319,6 +322,7 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
 /// the pitch and a combination of pulses such that its norm is still equal
 /// to 1. This is the function that will typically require the most CPU.
 /// Returns a mask indicating which blocks in the band received pulses.
+// IX-EASY: the one site is `iy.rg(..N)`, a re-slice of a buffer sized for the largest `N`.
 pub fn alg_quant(X: &mut [f32], N: i32, K: i32, spread: i32, B: i32, enc: &mut ec_enc, gain: f32, resynth: i32) -> u32 {
     let st = stack::save();
 
@@ -344,6 +348,7 @@ pub fn alg_quant(X: &mut [f32], N: i32, K: i32, spread: i32, B: i32, enc: &mut e
     collapse_mask
 }
 
+// IX-EASY: `X[..N]` re-slice.
 pub fn renormalise_vector(X: &mut [f32], N: i32, gain: f32) {
     let E: f32 = EPSILON + celt_inner_prod(X, X, N);
     let t = E;
@@ -355,6 +360,7 @@ pub fn renormalise_vector(X: &mut [f32], N: i32, gain: f32) {
     /*return celt_sqrt(E);*/
 }
 
+// IX-EASY: `X[..N]`, `Y[..N]` re-slice, or zip.
 pub fn stereo_itheta(X: &[f32], Y: &[f32], stereo: i32, N: i32) -> i32 {
     let mut Emid: f32 = 0.0;
     let mut Eside: f32 = 0.0;

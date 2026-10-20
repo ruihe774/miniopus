@@ -15,6 +15,9 @@ use crate::stack;
 /// C passes pointers `in` and `out` into larger buffers; here `in_`/`out` are the whole buffers
 /// and `in_off`/`out_off` the offsets of the C pointers, e.g. from compute_mdcts.
 /// `out` is written at `out_off + stride*k`.
+// IX-MIXED: the `trig`/`f`/`f2`/`bitrev_t`/`out` loops over `0..N4` are EASY (re-slice); the first three
+// loops index `in_` and `window` through the running `xp1`/`xp2`/`wp1`/`wp2` pointers (signed counters
+// cast to `usize`), which is HARD.
 pub fn clt_mdct_forward(in_: &[f32], in_off: usize, out: &mut [f32], out_off: usize, shift: i32, stride: i32) {
     let window = &modes::window;
     let overlap = modes::overlap;

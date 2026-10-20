@@ -29,6 +29,8 @@ static gains: [[f32; 3]; 3] = [
 /// # Safety
 /// `x` must have `max(T0,T1,15)+2` readable floats before it and `N` after it; `y` must have
 /// `N` writable floats. `y == x` (in place) is allowed; the regions otherwise must not overlap.
+// IX-MIXED: `window.at(i)` over `0..overlap` is EASY; `gains.at(tapset).at(k)` (`tapset` is the coded
+// tapset, not bounded by a type) is HARD.
 pub unsafe fn comb_filter(
     y: *mut f32,
     x: *const f32,
@@ -101,6 +103,8 @@ pub unsafe fn comb_filter(
 pub static tf_select_table: [i8; 8] = [0, -2, 0, -3, 3, 0, 1, -1];
 
 /// init_caps for LM == 3; `cache_caps` only holds the rows of LM 3, indexed by `(C-1)*nbEBands + i`.
+// IX-EASY: `i < nbEBands`: `eBands.at(i + 1)`, `cap.at_mut(i)` and `cache_caps.at((C - 1) * nbEBands + i)`
+// are all constant-bounded; re-slice `cap` and take `C` as 1 or 2.
 pub fn init_caps(cap: &mut [i32], C: i32) {
     for i in 0..modes::nbEBands {
         let N = (modes::eBands.at(i as usize + 1) as i32 - modes::eBands.at(i as usize) as i32) << 3;

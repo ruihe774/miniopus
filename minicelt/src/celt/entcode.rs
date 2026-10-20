@@ -75,6 +75,7 @@ pub fn ec_tell(this: &ec_ctx) -> i32 {
 }
 
 /// Returns the number of bits used so far, scaled by 2**BITRES.
+// IX-EASY: `correction.at(b)` on an 8-element array, `b = (r >> 12) - 8` with `r` a 16-bit value: `b & 7` proves it.
 pub fn ec_tell_frac(this: &ec_ctx) -> u32 {
     /* This is a faster version of ec_tell_frac() that takes advantage
     of the low (1/8 bit) resolution to use just a linear function
