@@ -601,8 +601,7 @@ pub fn tf_encode(start: i32, end: i32, isTransient: i32, tf_res: &mut [i32], mut
 
 /// `X` holds the two channels of normalized spectrum (`N0` coefficients each) when `C == 2`.
 /// `bandLogE` is `C*nbEBands`. `analysis` and `surround_trim` are dropped (see section header).
-// IX-HARD: `X.rg(a..)`/`X.rg(n0 + a..)`: offsets from the band edges `<< LM`, no length to prove them
-// against. The band-level `bandLogE` loop is left on `Ix` too; not measured.
+#[inline(never)]
 pub fn alloc_trim_analysis(
     X: &[f32],
     bandLogE: &[f32],
@@ -628,22 +627,21 @@ pub fn alloc_trim_analysis(
     if C == 2 {
         let mut sum: f32 = 0.0; /* Q10 */
         let mut minXC: f32; /* Q10 */
-        let n0 = N0 as usize;
+        let (XL, XR) = X.split_at(N0 as usize);
+        /* inner product of the two channels over band `e[0]..e[1]` */
+        let band_prod = |e: &[i16]| {
+            let (a, b) = ((e[0] as usize) << LM, (e[1] as usize) << LM);
+            celt_inner_prod(&XL[a..b], &XR[a..b], (b - a) as i32)
+        };
         /* Compute inter-channel correlation for low frequencies */
-        for i in 0..8usize {
-            let a = (eb.at(i) as usize) << LM;
-            let n = (eb.at(i + 1) as i32 - eb.at(i) as i32) << LM;
-            let partial = celt_inner_prod(X.rg(a..), X.rg(n0 + a..), n);
-            sum = sum + partial;
+        for e in eb[..9].windows(2) {
+            sum = sum + band_prod(e);
         }
         sum = (1.0f32 / 8.0) * sum;
         sum = MIN16(1.0, ABS16(sum));
         minXC = sum;
-        for i in 8..intensity as usize {
-            let a = (eb.at(i) as usize) << LM;
-            let n = (eb.at(i + 1) as i32 - eb.at(i) as i32) << LM;
-            let partial = celt_inner_prod(X.rg(a..), X.rg(n0 + a..), n);
-            minXC = MIN16(minXC, ABS16(partial));
+        for e in eb.get(8..intensity as usize + 1).unwrap_or(&[]).windows(2) {
+            minXC = MIN16(minXC, ABS16(band_prod(e)));
         }
         minXC = MIN16(1.0, ABS16(minXC));
         /* mid-side savings estimations based on the LF average*/
@@ -656,9 +654,9 @@ pub fn alloc_trim_analysis(
     }
 
     /* Estimate spectral tilt */
-    for c in 0..C {
-        for i in 0..end - 1 {
-            diff += bandLogE.at((i + c * modes::nbEBands) as usize) * (2 + 2 * i - end) as f32;
+    for c in 0..C as usize {
+        for (i, &b) in bandLogE[c * modes::nbEBands as usize..][..end as usize - 1].iter().enumerate() {
+            diff += b * (2 + 2 * i as i32 - end) as f32;
         }
     }
     diff /= (C * (end - 1)) as f32;
