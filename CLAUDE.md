@@ -12,6 +12,12 @@ and `minicelt/` (CELT-only). Each crate has its own `CLAUDE.md` (scope) and `POR
   against it, minicelt by tolerance (its SIMD kernels sum in lane order; see minicelt/PORTING.md).
   C reference builds use `-ffp-contract=off`.
 
+- Porting is finished. Closeness to the C code is no longer a criterion, either for or against a change:
+  idiomatic Rust rewrites (renamed/specialised functions, constants hardcoded for the only call site,
+  restructured loops) are fine as long as output stays correct (bit-exact for minisilk, within tolerance
+  for minicelt). Judge changes by bounds checks, size, speed and test results. The translation rules in
+  each `PORTING.md` describe the porting phase.
+
 ## Layout
 
 - `minisilk/`, `minicelt/`: `src/` (library), `wasm/` (cdylib with the `mini*_*` exports),

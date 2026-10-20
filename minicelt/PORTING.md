@@ -95,8 +95,7 @@ bit-exact comparison below. What was removed or specialized:
 - Tables that are not stored: the `CELT_PVQ_U_DATA` table (1272 `u32`) is built at init by the
   recurrence (`cwrs::init_cwrs`), the FFT twiddles from their first octant by symmetry and the
   bit-reversal tables by `compute_bitrev_table` (`kiss_fft::init_fft`). They live in `.bss`.
-  `scripts/gen_tables.py` checks that the rules reproduce libopus' tables bit for bit (the PVQ
-  recurrence was checked against celt/cwrs.c once, entry by entry). The MDCT twiddles and the
+  `scripts/gen_tables.py` checks that the rules reproduce libopus' tables bit for bit. The MDCT twiddles and the
   window are not derivable bit-exactly (the C tables are not correctly rounded libm values) and stay.
 - libm: `sqrt` and `floor` are the wasm instructions (`arch::sqrt64`, `arch::floor64`);
   `celt_cos_norm` is the part of libm's `cos` that its angles reach, and `acos64` libm's `acos`
@@ -104,10 +103,10 @@ bit-exact comparison below. What was removed or specialized:
   inputs they can see). Only `log` and `exp` are still `libm`'s.
 - Bounds checks: indexing goes through `arch::Ix` (`x.at(i)`, `*x.at_mut(i) = v`,
   `x.rg(a..b)`), unchecked like C in release and checked in the `checked` profile (debug
-  assertions). This removed several hundred panic sites (about 14 KB of code and source
-  locations) at no change in behaviour. New code should use it, and run the `checked` tests.
-- Memory: the pseudostack is 16 KiB (was 56 KiB) and the shadow stack 8 KiB (was 1 MiB; the module stays one page up to about 10 KiB), so the whole
-  module is one 64 KiB wasm page (was 18). What got the pseudostack down: `norm` of
+  assertions), which keeps panic sites (code and source locations) out of the release build. New code
+  should use it, and run the `checked` tests.
+- Memory: the pseudostack is 16 KiB and the shadow stack 8 KiB (the module stays one page up to about
+  10 KiB), so the whole module is one 64 KiB wasm page. What keeps the pseudostack small: `norm` of
   `quant_all_bands` only exists when the theta RDO resynthesises (without it the folding source
   is never read), the C `X` buffer is the `in` buffer, which with the PCM copy is the caller's static
   input buffer (`wasm/src/lib.rs`: `IN_BUF_FRAME` samples per channel, clobbered by encoding, and the
@@ -127,7 +126,7 @@ Regression check for trims that must not change anything: encode a corpus with a
 the new one and require identical packets, final ranges and `in_dtx` (the tolerance gate below
 does not see small changes). Mono/stereo, complexity 0..10, bitrates from 500 to 750000, constrained VBR
 on/off, packet loss, bandwidths, DTX, i16/f32, dynamic ctl changes and the speech corpus were used,
-both variants. The trim from 121629/121558 to the current size changed no packet.
+both variants.
 
 ## Translation rules
 
@@ -187,12 +186,10 @@ both variants. The trim from 121629/121558 to the current size changed no packet
 
 ## Tests
 
-There are no Rust unit tests. During development every ported function was compared
-bit-exactly against the same C function (a wasm32-wasip1 build of the fork's C, linked into
-`cargo test` and run under Node's WASI, so C and Rust ran the same SIMD in the same engine); that
-per-function oracle, its wrapper TUs and the tests are kept at the git tag
-`minicelt-oracle-tests` (`minicelt/scripts/oracle-test.sh [2|3|all]` there). The test suite is
-now end to end only:
+There are no Rust unit tests; the test suite is end to end only. A per-function bit-exact oracle
+(a wasm32-wasip1 build of the fork's C, linked into `cargo test` and run under Node's WASI, so C and
+Rust run the same SIMD in the same engine) is kept at the git tag `minicelt-oracle-tests`
+(`minicelt/scripts/oracle-test.sh [2|3|all]` there); check it out to localize a regression.
 
 **End to end** (`minicelt/test/compare.ts`, Deno; `scripts/test.sh celt [--quick] [--all]
 [--strict-scalar] [--filter=text] [audio files...]`). Every implementation sits behind one
@@ -210,8 +207,8 @@ failure): `wasm2` = `wasm2-checked`, `wasm3` = `wasm3-checked`. **Informational*
 wasm builds. Native scalar is *not* an exact reference for the minicelt builds (unlike SILK): the float
 SIMD kernels (`celt_inner_prod`, `dual_inner_prod`, `xcorr_kernel`/`celt_pitch_xcorr`, `op_pvq_search`, ...)
 accumulate in lane order, not in the C order, so packets differ in a share of the frames (identical SNR).
-The fork's C built with its kernels disabled was bit-exact with scalar in every run (checked while the fork
-was part of the tests), so the harness, the libm and the signal path are not the cause. `--strict-scalar`
+The fork's C built with its kernels disabled is bit-exact with scalar, so the harness, the libm and
+the signal path are not the cause. `--strict-scalar`
 makes scalar vs `wasm2`/`wasm2-checked` exact pairs. Any trap, native decoder error, bad TOC or
 encoder/decoder final range mismatch fails every run. Every packet is also decoded natively (scalar
 decoder with the right channel count) and the SNR of the decoded streams is reported.

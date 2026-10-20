@@ -97,11 +97,9 @@ One Rust module per C file, with the C file name (`silk/NLSF_VQ.c` →
   like C in release and checked in the `checked` profile (debug assertions). Converting the
   files with run-time-indexed slices (`NSQ`, `NSQ_del_dec`, `noise_shape_analysis_FLP`,
   `pitch_analysis_core_FLP`, `burg_modified_FLP`, `NLSF_del_dec_quant`, `encode_pulses`,
-  `wrappers_FLP`, `NLSF2A`, `A2NLSF`, `corrMatrix_FLP`) removed about 3.1 KB of the release wasm
-  (73822 -> 70732 bytes for WASM 2.0, 73408 -> 71007 for 3.0) at no change in behaviour.
-  Files whose loops have constant bounds (`VAD`, `encode_frame_FLP`) gained nothing and stay
-  as they were. The remaining files are expected to give a few hundred bytes each at most.
-  New code should use it, and run the `checked` tests.
+  `wrappers_FLP`, `NLSF2A`, `A2NLSF`, `corrMatrix_FLP`) drops panic sites from the release wasm.
+  Files whose loops have constant bounds (`VAD`, `encode_frame_FLP`) gain nothing and use plain
+  indexing. New code should use it, and run the `checked` tests.
 - `silk_assert`/`celt_assert` → `debug_assert!`. Drop `arch` parameters.
 - Plain C arithmetic uses plain Rust operators, so debug builds trap on
   overflow. Use the `_ovflw` macros / `wrapping_*` exactly where C does. If C
@@ -179,5 +177,5 @@ submodule), `scripts/build.sh silk all both`, then the comparison.
   packet is also decoded natively and its decoder final range checked.
 - A mismatch shows only where the stream diverges. The per-function
   differential tests against a wasm build of the C (one per ported function,
-  comparing whole encoder states) are kept at the tag `minisilk-oracle-tests` (commit `adfc1f7`, the parent of
-  `c58066e`, which dropped them); check it out to localize a regression.
+  comparing whole encoder states) are kept at the tag `minisilk-oracle-tests`; check it out to
+  localize a regression.
