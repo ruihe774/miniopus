@@ -187,9 +187,6 @@ fn stereo_merge(X: &mut [f32], Y: &mut [f32], mid: f32, N: i32) {
 }
 
 /// Decide whether we should spread the pulses in the current frame
-// IX-HARD: `x.at(j)` over `X.rg(M * eBands[i] + c * N0..)` (offset from the band table, and the per-sample
-// loop of this function) and `eBands.at(i)` (bounded only by the caller's `end`). `tcount[0..3]` (constant
-// indices into `[i32; 3]`) and `spread_weight.at(i)` are left on `Ix` as well; not measured.
 pub fn spreading_decision(
     X: &[f32],
     average: &mut i32,
@@ -210,40 +207,45 @@ pub fn spreading_decision(
 
     debug_assert!(end > 0);
 
-    let N0 = M * modes::shortMdctSize;
+    let N0 = (M * modes::shortMdctSize) as usize;
+    let bands = &eBands[..end as usize + 1];
+    let spread_weight = &spread_weight[..end as usize];
 
-    if M * (eBands.at(end as usize) as i32 - eBands.at((end - 1) as usize) as i32) <= 8 {
+    if let [.., a, b] = *bands
+        && M * (b as i32 - a as i32) <= 8
+    {
         return SPREAD_NONE;
     }
-    for c in 0..C {
-        for i in 0..end as usize {
+    for c in 0..C as usize {
+        let Xc = &X[c * N0..][..N0];
+        for (i, (b, &w)) in bands.windows(2).zip(spread_weight).enumerate() {
             let mut tcount = [0i32; 3];
-            let x = X.rg((M * eBands.at(i) as i32 + c * N0) as usize..);
-            let N = M * (eBands.at(i + 1) as i32 - eBands.at(i) as i32);
+            let x = &Xc[M as usize * b[0] as usize..M as usize * b[1] as usize];
+            let N = x.len() as i32;
             if N <= 8 {
                 continue;
             }
             /* Compute rough CDF of |x[j]| */
-            for j in 0..N as usize {
-                let x2N: f32 = (x.at(j) * x.at(j)) * N as f32; /* Q13 */
+            for &xj in x {
+                let x2N: f32 = (xj * xj) * N as f32; /* Q13 */
                 if x2N < 0.25f32 {
-                    *tcount.at_mut(0) += 1;
+                    tcount[0] += 1;
                 }
                 if x2N < 0.0625f32 {
-                    *tcount.at_mut(1) += 1;
+                    tcount[1] += 1;
                 }
                 if x2N < 0.015625f32 {
-                    *tcount.at_mut(2) += 1;
+                    tcount[2] += 1;
                 }
             }
 
             /* Only include four last bands (8 kHz and up) */
             if i as i32 > modes::nbEBands - 4 {
-                hf_sum += celt_udiv((32 * (tcount.at(1) + tcount.at(0))) as u32, N as u32) as i32;
+                hf_sum += celt_udiv((32 * (tcount[1] + tcount[0])) as u32, N as u32) as i32;
             }
-            let tmp = (2 * tcount.at(2) >= N) as i32 + (2 * tcount.at(1) >= N) as i32 + (2 * tcount.at(0) >= N) as i32;
-            sum += tmp * spread_weight.at(i);
-            nbBands += spread_weight.at(i);
+            let tmp = (2 * tcount[2] >= N) as i32 + (2 * tcount[1] >= N) as i32 + (2 * tcount[0] >= N) as i32;
+            sum += tmp * w;
+            nbBands += w;
         }
     }
 
