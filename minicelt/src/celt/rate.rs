@@ -65,8 +65,10 @@ fn eb(i: i32) -> i32 {
     modes::eBands.at(i as usize) as i32
 }
 
-// IX-MIXED: the `bits`/`bits1`/`bits2`/`thresh`/`cap`/`ebits`/`fine_priority` loops over `start..end` are EASY
-// (re-slice to `end`); `LOG2_FRAC_TABLE.at(j - start)` is HARD (no bound but the caller's band counts).
+// IX-MIXED: the `bits`/`bits1`/`bits2`/`thresh`/`cap`/`ebits`/`fine_priority` loops over `start..end` are
+// provable by re-slicing all seven to `end` up front, but that adds seven panic sites and LLVM still keeps
+// the checks in the `codedBands` loops (tried: +253 bytes, +7 `unreachable`), so they stay on `Ix`;
+// `LOG2_FRAC_TABLE.at(j - start)` is HARD (no bound but the caller's band counts).
 fn interp_bits2pulses(
     end: i32, skip_start: i32, bits1: &[i32], bits2: &[i32], thresh: &[i32],
     cap: &[i32], mut total: i32, _balance: &mut i32, skip_rsv: i32, intensity: &mut i32,
@@ -336,8 +338,9 @@ fn interp_bits2pulses(
 /// Compute the pulse allocation, i.e. how many pulses will go in each band
 /// (always encoding; `pulses` receives the bits per band).
 /// Returns codedBands.
-// IX-MIXED: `thresh`/`trim_offset`/`offsets`/`cap`/`bits1`/`bits2` loops over `start..end` are EASY (re-slice
-// to `end`); `allocVectors.at(mid * len + j)` and `LOG2_FRAC_TABLE.at(end - start)` are HARD.
+// IX-MIXED: `thresh`/`trim_offset`/`offsets`/`cap`/`bits1`/`bits2` loops over `start..end` could be re-sliced to
+// `end`, but each up-front re-slice adds a panic site (see `interp_bits2pulses`: +253 bytes for seven), so
+// they stay on `Ix`; `allocVectors.at(mid * len + j)` and `LOG2_FRAC_TABLE.at(end - start)` are HARD.
 pub fn clt_compute_allocation(
     end: i32, offsets: &[i32], cap: &[i32], alloc_trim: i32,
     intensity: &mut i32, dual_stereo: &mut i32, mut total: i32, balance: &mut i32, pulses: &mut [i32],
