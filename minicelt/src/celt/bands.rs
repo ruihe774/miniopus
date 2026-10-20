@@ -889,7 +889,6 @@ const MIN_STEREO_ENERGY: f32 = 1e-10;
 /* This function is responsible for encoding and decoding a band for the stereo case. */
 /// # Safety
 /// As `quant_band`, plus `Y` valid for `N` floats and disjoint from `X`.
-// IX-HARD: `ctx.bandE.at(ctx.i)` / `at(nbEBands + ctx.i)`, `ctx.i` is the band index set by the caller.
 unsafe fn quant_band_stereo(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -916,7 +915,7 @@ unsafe fn quant_band_stereo(
     let orig_fill = fill;
 
     {
-        let (bi, bs) = (ctx.bandE.at(ctx.i as usize), ctx.bandE.at((modes::nbEBands + ctx.i) as usize));
+        let (bi, bs) = (ctx.bandE[ctx.i as usize], ctx.bandE[(modes::nbEBands + ctx.i) as usize]);
         if bi < MIN_STEREO_ENERGY || bs < MIN_STEREO_ENERGY {
             unsafe {
                 if bi > bs {
