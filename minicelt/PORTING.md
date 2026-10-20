@@ -141,9 +141,17 @@ Speed regressions: `minicelt/test/bench.ts` (Deno; usage in its header) encodes 
 speech corpus with two builds, interleaved, and prints min/median time and output size per
 configuration. Differences below about 0.2 % are noise. Run it for any change that touches a hot loop
 (it covers mono at 24 and 64 kbps and stereo at 6 to 128 kbps, complexity 5 and 10, i.e. every function
-changed in the Ix conversion; an instrumented unoptimized build (`wasm-opt --log-execution`) over these
-and 9 more configurations entered all of them, but `stereo_fade` only at 24 kbps and below. It does not
+changed in the Ix conversion; `stereo_fade` only runs for stereo at 24 kbps and below. It does not
 cover packet loss, bandwidth limits, DTX or constrained VBR, nor low complexity).
+
+Coverage: `scripts/coverage.sh [--quick]` builds an unoptimized module (so functions are not inlined
+away), instruments it with `wasm-opt --log-execution` and encodes the speech corpus in 19 configurations
+(mono/stereo, 6 to 510 kbps, complexity 0 to 10, constrained VBR, DTX, packet loss, bandwidth limits)
+through it. It prints, to stdout only, the functions never entered and the functions with unhit logging
+points (function entries, loop headers, branch arms, returns; not source lines), per module. CI runs it
+as the `coverage` job (log only, never fails the workflow, nothing uploaded). The workload is its own, not
+`compare.ts`'s, so a function it reports as never entered may still be reached by the test suite
+(`quant_band_n1`, for one, is not reached by the speech corpus).
 
 ## Translation rules
 

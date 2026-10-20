@@ -40,3 +40,31 @@ jobs:
         with:
           name: wasm
           path: target/mini*-wasm[23].wasm
+
+  # Function and branch-arm coverage of minicelt (an instrumented unoptimized build over the speech corpus),
+  # printed to the log only: nothing is uploaded or gated, and the job never fails the workflow.
+  coverage:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Install binaryen
+        env:
+          BINARYEN: version_133
+        run: |
+          base=https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN
+          tar=binaryen-$BINARYEN-x86_64-linux.tar.gz
+          curl -fsSLO "$base/$tar" -O "$base/$tar.sha256"
+          sha256sum -c "$tar.sha256"
+          tar xzf "$tar"
+          echo "$PWD/binaryen-$BINARYEN/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@v2
+      - name: minicelt coverage
+        run: scripts/coverage.sh
