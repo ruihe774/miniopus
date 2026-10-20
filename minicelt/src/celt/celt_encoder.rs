@@ -669,28 +669,24 @@ pub fn alloc_trim_analysis(
 }
 
 /// Returns `dual_stereo` (0/1). `X` holds the two channels of normalized spectrum (`N0` each).
-// IX-HARD: `X.at(j)`/`X.at(N0 + j)` with `j` from the band edges, in a per-sample loop. The `eb.at(i)` reads
-// for `i < 14` (constant bound on the band table) are left on `Ix` too; not measured.
 pub fn stereo_analysis(X: &[f32], N0: i32) -> i32 {
     let mut sumLR: f32 = EPSILON;
     let mut sumMS: f32 = EPSILON;
-    let eb = modes::eBands;
+    /* bands 0..13 are contiguous: bins 0..eBands[13] << LM */
+    let n13 = (modes::eBands[13] as usize) << LM;
 
     /* Use the L1 norm to model the entropy of the L/R signal vs the M/S signal */
-    for i in 0..13usize {
-        for j in (eb.at(i) as usize) << LM..(eb.at(i + 1) as usize) << LM {
-            /* We cast to 32-bit first because of the -32768 case */
-            let L = X.at(j);
-            let R = X.at(N0 as usize + j);
-            let M = L + R;
-            let S = L - R;
-            sumLR = sumLR + (ABS32(L) + ABS32(R));
-            sumMS = sumMS + (ABS32(M) + ABS32(S));
-        }
+    for (&L, &R) in X[..n13].iter().zip(&X[N0 as usize..][..n13]) {
+        /* We cast to 32-bit first because of the -32768 case */
+        let M = L + R;
+        let S = L - R;
+        sumLR = sumLR + (ABS32(L) + ABS32(R));
+        sumMS = sumMS + (ABS32(M) + ABS32(S));
     }
     sumMS = 0.707107 * sumMS;
     let thetas: i32 = 13;
-    (((((eb.at(13) as i32) << (LM + 1)) + thetas) as f32 * sumMS) > (((eb.at(13) as i32) << (LM + 1)) as f32 * sumLR)) as i32
+    let n = (n13 as i32) << 1;
+    (((n + thetas) as f32 * sumMS) > (n as f32 * sumLR)) as i32
 }
 
 /// Median of `x[0..5]`.
