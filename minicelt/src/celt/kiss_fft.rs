@@ -140,6 +140,7 @@ fn HALF_OF(x: f32) -> f32 {
 }
 
 /// Radix-2 butterfly. `Fout` is the start of the FFT buffer.
+#[inline(always)]
 fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
     // (m==1 is only used by CUSTOM_MODES.)
     let _ = m;
@@ -172,6 +173,7 @@ fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
 // (`scratch` and the `m == 1` branch, via `as_chunks_mut::<4>`, are plain.) Tried `split_at_mut` into four
 // sub-slices + zip + `tw.iter().step_by(k * fstride)`: no panic branch in the loop, but +560 B for this
 // function (+340 bfly3, +460 bfly5) and encode time +0.5 %, so the checked-free `Ix` form stays.
+#[inline(always)]
 fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     if m == 1 {
         /* Degenerate case where all the twiddles are 1. */
@@ -225,6 +227,7 @@ fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 
 // IX-HARD: `Fout.at(fo + k * m)` and `tw.at(..)`: offsets from the runtime `m`, `mm`, `fstride`.
 // (`scratch` is plain.) The split_at_mut/zip/step_by form costs +340 B (see `kf_bfly4`).
+#[inline(always)]
 fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let m2 = 2 * m;
@@ -270,6 +273,7 @@ fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 
 // IX-HARD: `Fout.at(f1..f4 + u)` and `tw.at(k * u * fstride)`: offsets from the runtime `m`, `mm`, `fstride`.
 // (`scratch` is plain.) The split_at_mut/zip/step_by form costs +460 B (see `kf_bfly4`).
+#[inline(always)]
 fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let mut scratch = [kiss_fft_cpx::default(); 13];
@@ -321,37 +325,24 @@ fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 }
 
 /// In-place FFT on bit-reversed input (`fft_downshift` is a no-op in the float build).
-// IX-HARD: `st.factors.at(2 * L ..)` and `fstride.at(L + 1)`: `L` is found by walking the factor table
-// until `m == 1`, so its bound is data (the table), not a length.
+/// The stage loop of kiss_fft.c unrolled for the two FFTs in use (the factor tables
+/// `fft_state48000_960_0` `[5, 96, 3, 32, 4, 8, 2, 4, 4, 1]` and `_3` `[5, 12, 3, 4, 4, 1]`):
+/// stages run from the last factor to the first with `kf_bfly*(Fout, fstride << shift, tw, m, N, mm)`.
 pub fn opus_fft_impl(st: &kiss_fft_state, fout: &mut [kiss_fft_cpx]) {
-    let mut fstride = [0i32; MAXFACTORS];
     let tw = twiddles();
-
-    /* st->shift can be -1 */
-    let shift = if st.shift > 0 { st.shift } else { 0 };
-
-    *fstride.at_mut(0) = 1;
-    let mut L = 0usize;
-    let mut m;
-    loop {
-        let p = st.factors.at(2 * L) as i32;
-        m = st.factors.at(2 * L + 1) as i32;
-        *fstride.at_mut(L + 1) = fstride.at(L) * p;
-        L += 1;
-        if m == 1 {
-            break;
-        }
-    }
-    m = st.factors.at(2 * L - 1) as i32;
-    for i in (0..L).rev() {
-        let m2 = if i != 0 { st.factors.at(2 * i - 1) as i32 } else { 1 };
-        match st.factors.at(2 * i) {
-            2 => kf_bfly2(fout, m, fstride.at(i)),
-            4 => kf_bfly4(fout, (fstride.at(i) << shift) as usize, tw, m, fstride.at(i), m2),
-            3 => kf_bfly3(fout, (fstride.at(i) << shift) as usize, tw, m, fstride.at(i), m2),
-            5 => kf_bfly5(fout, (fstride.at(i) << shift) as usize, tw, m, fstride.at(i), m2),
-            _ => {}
-        }
-        m = m2;
+    if st.shift <= 0 {
+        /* 480 points (shift -1, treated as 0) */
+        debug_assert!(st.factors[..10] == [5, 96, 3, 32, 4, 8, 2, 4, 4, 1]);
+        kf_bfly4(fout, 120, tw, 1, 120, 4);
+        kf_bfly2(fout, 4, 60);
+        kf_bfly4(fout, 15, tw, 8, 15, 32);
+        kf_bfly3(fout, 5, tw, 32, 5, 96);
+        kf_bfly5(fout, 1, tw, 96, 1, 1);
+    } else {
+        /* 60 points (shift 3) */
+        debug_assert!(st.shift == 3 && st.factors[..6] == [5, 12, 3, 4, 4, 1]);
+        kf_bfly4(fout, 15 << 3, tw, 1, 15, 4);
+        kf_bfly3(fout, 5 << 3, tw, 4, 5, 12);
+        kf_bfly5(fout, 1 << 3, tw, 12, 1, 1);
     }
 }
