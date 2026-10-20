@@ -358,8 +358,13 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     X.rg_mut(..N).copy_from_slice(tmp);
 }
 
-// IX-HARD: `chunks_exact_mut(2 * stride)` + `split_at_mut(stride)` is check-free in the loop but converted:
-// +1.0% encode time (+124 bytes).
+// IX-HARD: very sensitive to its loop shape (called per band and level from tf_analysis and quant_band, often
+// with few pairs). Check-free forms tried, encode time vs this one (wasm2, min/median):
+// - `chunks_exact_mut(2 * stride)` + `split_at_mut(stride)`, pair by pair: +1.0% (+124 B); with copies
+//   for the strides 1/2/4/8: +0.6%/+0.5% (+614 B); with `as_chunks_mut::<{2 * stride}>` for 1/2/4/8 (no
+//   division): +0.7%/+0.7% (+587 B); single form with `#[inline(always)]`: +0.7%/+0.8% (+1.3 KiB).
+// - column order kept (`for i in 0..stride`, `chunks_exact_mut(2 * stride)`, `c[i]`/`c[stride + i]`): the
+//   index checks stay in the inner loop, and +0.4%/+0.55% (+145 B).
 pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     N0 >>= 1;
     let stride = stride as usize;
