@@ -36,15 +36,20 @@ fn exp_rotation1(X: &mut [f32], len: i32, stride: i32, c: f32, s: f32) {
     }
 }
 
-// IX-EASY: `SPREAD_FACTOR.at(spread - 1)` is a `match` on `spread` (1..=3); `X.rg_mut(i * len..)` is bounded by `stride * len`.
+// IX-HARD: `X.rg_mut(i * len..)`: `X` has no known length; `X[..stride * len].chunks_exact_mut(len)` measured
+// +82 bytes, +2 `unreachable` (slice check and zero-length check). The spread-factor lookup is a `match`.
 pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, spread: i32) {
-    const SPREAD_FACTOR: [i32; 3] = [15, 10, 5];
     let mut stride2: i32 = 0;
 
     if 2 * K >= len || spread == SPREAD_NONE {
         return;
     }
-    let factor = SPREAD_FACTOR.at((spread - 1) as usize);
+    /* SPREAD_LIGHT, SPREAD_NORMAL, SPREAD_AGGRESSIVE */
+    let factor = match spread {
+        1 => 15,
+        2 => 10,
+        _ => 5,
+    };
 
     let gain: f32 = (1.0f32 * len as f32) / ((len + factor * K) as f32);
     let theta: f32 = 0.5f32 * (gain * gain);
@@ -84,12 +89,14 @@ pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, 
 fn normalise_residual(iy: &[i32], X: &mut [f32], N: i32, Ryy: f32, gain: f32) {
     let t = Ryy;
     let g = celt_rsqrt_norm32(t) * gain;
-    for i in 0..N as usize {
-        *X.at_mut(i) = iy.at(i) as f32 * g;
+    for (x, &y) in X[..N as usize].iter_mut().zip(&iy[..N as usize]) {
+        *x = y as f32 * g;
     }
 }
 
-// IX-EASY: `iy[..B * N0].chunks_exact(N0)`.
+// IX-HARD: tried `iy[..B * N0].chunks_exact(N0)` and `iy.chunks(N0.max(1)).take(B)`: `iy` has no known length
+// here, so the first adds a slice check and a zero-divisor check (+110 bytes, +2 `unreachable`), the second
+// is check-free but still +35 bytes.
 fn extract_collapse_mask(iy: &[i32], N: i32, B: i32) -> u32 {
     if B <= 1 {
         return 1;
@@ -322,7 +329,8 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
 /// the pitch and a combination of pulses such that its norm is still equal
 /// to 1. This is the function that will typically require the most CPU.
 /// Returns a mask indicating which blocks in the band received pulses.
-// IX-EASY: the one site is `iy.rg(..N)`, a re-slice of a buffer sized for the largest `N`.
+// IX-HARD: the one site is `iy.rg(..N)`; `iy` is `alloc(N + 3)` but the compiler does not connect the two
+// lengths (`&iy[..N]` measured +33 bytes, +1 `unreachable`).
 pub fn alg_quant(X: &mut [f32], N: i32, K: i32, spread: i32, B: i32, enc: &mut ec_enc, gain: f32, resynth: i32) -> u32 {
     let st = stack::save();
 
@@ -354,8 +362,8 @@ pub fn renormalise_vector(X: &mut [f32], N: i32, gain: f32) {
     let t = E;
     let g: f32 = celt_rsqrt_norm(t) * gain;
 
-    for i in 0..N as usize {
-        *X.at_mut(i) = g * X.at(i);
+    for x in &mut X[..N as usize] {
+        *x = g * *x;
     }
     /*return celt_sqrt(E);*/
 }
@@ -365,9 +373,9 @@ pub fn stereo_itheta(X: &[f32], Y: &[f32], stereo: i32, N: i32) -> i32 {
     let mut Emid: f32 = 0.0;
     let mut Eside: f32 = 0.0;
     if stereo != 0 {
-        for i in 0..N as usize {
-            let m = X.at(i) + Y.at(i);
-            let s = X.at(i) - Y.at(i);
+        for (&x, &y) in X[..N as usize].iter().zip(&Y[..N as usize]) {
+            let m = x + y;
+            let s = x - y;
             Emid = Emid + m * m;
             Eside = Eside + s * s;
         }

@@ -130,14 +130,13 @@ wanted to minimize the MSE in the non-normalized domain. This roughly
 corresponds to some quick-and-dirty perceptual experiments I ran to
 measure inter-aural masking (there doesn't seem to be any published data
 on the topic). */
-// IX-EASY: constant indices 0 and 1 on a `[f32; 2]`.
 fn compute_channel_weights(mut Ex: f32, mut Ey: f32, w: &mut [f32; 2]) {
     let minE = MIN32(Ex, Ey);
     /* Adjustment to make the weights a bit more conservative. */
     Ex = Ex + minE / 3.0;
     Ey = Ey + minE / 3.0;
-    *w.at_mut(0) = Ex;
-    *w.at_mut(1) = Ey;
+    w[0] = Ex;
+    w[1] = Ey;
 }
 
 // IX-MIXED: the `X`/`Y` loop over `N` is EASY (re-slice); `bandE.at(bandID)`/`at(bandID + nbEBands)` is HARD.
@@ -154,17 +153,15 @@ fn intensity_stereo(X: &mut [f32], Y: &[f32], bandE: &[f32], bandID: i32, N: i32
     }
 }
 
-// IX-EASY: `X[..N]`, `Y[..N]` re-slice, or zip.
 fn stereo_split(X: &mut [f32], Y: &mut [f32], N: i32) {
-    for j in 0..N as usize {
-        let l = 0.70710678f32 * X.at(j);
-        let r = 0.70710678f32 * Y.at(j);
-        *X.at_mut(j) = l + r;
-        *Y.at_mut(j) = r - l;
+    for (x, y) in X[..N as usize].iter_mut().zip(&mut Y[..N as usize]) {
+        let l = 0.70710678f32 * *x;
+        let r = 0.70710678f32 * *y;
+        *x = l + r;
+        *y = r - l;
     }
 }
 
-// IX-EASY: `X[..N]`, `Y[..N]` re-slice, or zip.
 fn stereo_merge(X: &mut [f32], Y: &mut [f32], mid: f32, N: i32) {
     /* Compute the norm of X+Y and X-Y as |X|^2 + |Y|^2 +/- sum(xy) */
     let mut xp = celt_inner_prod(Y, X, N);
@@ -175,19 +172,19 @@ fn stereo_merge(X: &mut [f32], Y: &mut [f32], mid: f32, N: i32) {
     let El = mid * mid + side - 2.0 * xp;
     let Er = mid * mid + side + 2.0 * xp;
     if Er < 6e-4f32 || El < 6e-4f32 {
-        Y.rg_mut(..N as usize).copy_from_slice(X.rg(..N as usize));
+        Y[..N as usize].copy_from_slice(&X[..N as usize]);
         return;
     }
 
     let lgain = super::mathops::celt_rsqrt_norm32(El);
     let rgain = super::mathops::celt_rsqrt_norm32(Er);
 
-    for j in 0..N as usize {
+    for (x, y) in X[..N as usize].iter_mut().zip(&mut Y[..N as usize]) {
         /* Apply mid scaling (side is already scaled) */
-        let l = mid * X.at(j);
-        let r = Y.at(j);
-        *X.at_mut(j) = lgain * (l - r);
-        *Y.at_mut(j) = rgain * (l + r);
+        let l = mid * *x;
+        let r = *y;
+        *x = lgain * (l - r);
+        *y = rgain * (l + r);
     }
 }
 
@@ -349,7 +346,8 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     X.rg_mut(..N).copy_from_slice(tmp);
 }
 
-// IX-EASY: pairs `X[stride * 2 * j + i]`, `X[stride * (2 * j + 1) + i]`: `chunks_exact_mut(2 * stride)` + `split_at_mut(stride)`.
+// IX-HARD: `X` has no known length. `X[..2 * stride * N0].chunks_exact_mut(2 * stride)` + `split_at_mut(stride)`
+// measured +149 bytes, +3 `unreachable` (slice check, zero-chunk check, split check).
 pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     N0 >>= 1;
     let stride = stride as usize;
@@ -363,7 +361,6 @@ pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     }
 }
 
-// IX-EASY: `exp2_table8.at(qb & 7)` on an 8-element array: the mask proves it.
 fn compute_qn(N: i32, b: i32, offset: i32, pulse_cap: i32, stereo: i32) -> i32 {
     static exp2_table8: [i16; 8] = [16384, 17866, 19483, 21247, 23170, 25267, 27554, 30048];
     let mut qn: i32;
@@ -383,7 +380,7 @@ fn compute_qn(N: i32, b: i32, offset: i32, pulse_cap: i32, stereo: i32) -> i32 {
     if qb < (1 << BITRES >> 1) {
         qn = 1;
     } else {
-        qn = exp2_table8.at((qb & 0x7) as usize) as i32 >> (14 - (qb >> BITRES));
+        qn = exp2_table8[(qb & 0x7) as usize] as i32 >> (14 - (qb >> BITRES));
         qn = (qn + 1) >> 1 << 1;
     }
     debug_assert!(qn <= 256);

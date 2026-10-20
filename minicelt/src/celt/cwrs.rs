@@ -66,7 +66,8 @@ fn CELT_PVQ_V(_n: i32, _k: i32) -> u32 {
     CELT_PVQ_U(_n, _k) + CELT_PVQ_U(_n, _k + 1)
 }
 
-// IX-EASY: `_y[.._n]` re-slice; `j` walks down from `_n - 1`.
+// IX-HARD: `_y[.._n]` re-slice measured +55 bytes, +2 `unreachable`: the slice check, and the compiler cannot
+// prove the `j -= 1` below stays in range of `_n` (the loop exits on `j == 0`).
 fn icwrs(_n: i32, _y: &[i32]) -> u32 {
     debug_assert!(_n >= 2);
     let mut j = (_n - 1) as usize;

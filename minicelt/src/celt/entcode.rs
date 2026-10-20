@@ -1,6 +1,5 @@
 //! Port of celt/entcode.h and celt/entcode.c (encoder side).
 
-use super::arch::Ix;
 pub type ec_window = u32;
 
 pub const EC_WINDOW_SIZE: i32 = 32;
@@ -75,7 +74,6 @@ pub fn ec_tell(this: &ec_ctx) -> i32 {
 }
 
 /// Returns the number of bits used so far, scaled by 2**BITRES.
-// IX-EASY: `correction.at(b)` on an 8-element array, `b = (r >> 12) - 8` with `r` a 16-bit value: `b & 7` proves it.
 pub fn ec_tell_frac(this: &ec_ctx) -> u32 {
     /* This is a faster version of ec_tell_frac() that takes advantage
     of the low (1/8 bit) resolution to use just a linear function
@@ -85,7 +83,8 @@ pub fn ec_tell_frac(this: &ec_ctx) -> u32 {
     let mut l = ec_ilog(this.rng);
     let r = this.rng >> (l - 16);
     let mut b = ((r >> 12) - 8) as usize;
-    b += (r > correction.at(b)) as usize;
+    /* r is 16 bits with the top bit set, so b < 8 */
+    b += (r > correction[b & 7]) as usize;
     l = (l << 3) + b as i32;
     nbits.wrapping_sub(l as u32)
 }
