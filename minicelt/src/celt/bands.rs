@@ -101,20 +101,20 @@ pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], end: i32, C: i32) {
 }
 
 /// Normalise each band such that the energy is one.
-// IX-HARD: `freq`/`X` at `M * eBands[i] + j`: offsets from the band table, no length to prove them against.
-// The `bandE.at(i + c * nbEBands)` read (a per-channel re-slice would do) is left on `Ix` too: the function
-// keeps `Ix` for the other sites, and the conversion was not measured.
 pub fn normalise_bands(freq: &[f32], X: &mut [f32], bandE: &[f32], end: i32, C: i32) {
     /* M == 8 */
-    let M = 8;
+    let LM = 3;
     let eBands = modes::eBands;
-    let N = M * modes::shortMdctSize;
-    for c in 0..C {
-        for i in 0..end as usize {
-            let g: f32 = 1.0f32 / (1e-27f32 + bandE.at(i + (c * modes::nbEBands) as usize));
-            for j in M * eBands.at(i) as i32..M * eBands.at(i + 1) as i32 {
-                let k = (j + c * N) as usize;
-                *X.at_mut(k) = freq.at(k) * g;
+    let N = (modes::shortMdctSize << LM) as usize;
+    for c in 0..C as usize {
+        let freqc = &freq[c * N..][..N];
+        let Xc = &mut X[c * N..][..N];
+        let bandEc = &bandE[c * modes::nbEBands as usize..][..end as usize];
+        for (&e, b) in bandEc.iter().zip(eBands.windows(2)) {
+            let g: f32 = 1.0f32 / (1e-27f32 + e);
+            let r = (b[0] as usize) << LM..(b[1] as usize) << LM;
+            for (x, &f) in Xc[r.clone()].iter_mut().zip(&freqc[r]) {
+                *x = f * g;
             }
         }
     }
