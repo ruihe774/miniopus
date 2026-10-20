@@ -42,22 +42,18 @@ unsafe fn slice<'a>(p: *const f32, n: i32) -> &'a [f32] {
     unsafe { core::slice::from_raw_parts(p, n as usize) }
 }
 
-// IX-HARD: `thresholds`/`hysteresis` indexed by `i` and `prev - 1` (previous decision, carried state).
-pub fn hysteresis_decision(val: f32, thresholds: &[f32], hysteresis: &[f32], N: i32, prev: i32) -> i32 {
-    let mut i = 0;
-    while i < N {
-        if val < thresholds.at(i as usize) {
-            break;
-        }
-        i += 1;
-    }
-    if i > prev && val < thresholds.at(prev as usize) + hysteresis.at(prev as usize) {
+/// `N` is the length of the tables; `prev` (the previous decision) is in `0..=N`.
+pub fn hysteresis_decision<const N: usize>(val: f32, thresholds: &[f32; N], hysteresis: &[f32; N], prev: i32) -> i32 {
+    let prev = prev as usize;
+    let mut i = thresholds.iter().position(|&t| val < t).unwrap_or(N);
+    /* i > prev and i < prev imply prev < N and 0 < prev <= N */
+    if i > prev && val < thresholds[prev] + hysteresis[prev] {
         i = prev;
     }
-    if i < prev && val > thresholds.at((prev - 1) as usize) - hysteresis.at((prev - 1) as usize) {
+    if i < prev && val > thresholds[prev - 1] - hysteresis[prev - 1] {
         i = prev;
     }
-    i
+    i as i32
 }
 
 /// Linear congruential generator (relies on unsigned wraparound).
