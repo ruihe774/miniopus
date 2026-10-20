@@ -9,8 +9,6 @@ static LOG2_FRAC_TABLE: [u8; 24] = [
     0, 8, 13, 16, 19, 21, 23, 24, 26, 27, 28, 29, 30, 31, 32, 32, 33, 34, 34, 35, 36, 36, 37, 37,
 ];
 
-pub const LOG_MAX_PSEUDO: i32 = 6;
-
 pub const MAX_FINE_BITS: i32 = 8;
 
 pub const FINE_OFFSET: i32 = 21;
@@ -33,7 +31,7 @@ pub fn bits2pulses(band: i32, LM: i32, mut bits: i32) -> i32 {
     let n = cache[0] as usize;
 
     bits -= 1;
-    /* The binary search of rate.h (LOG_MAX_PSEUDO steps over 1..=n) as a branchless search:
+    /* The binary search of rate.h (LOG_MAX_PSEUDO = 6 steps over 1..=n) as a branchless search:
        cache[1..=n] is non-decreasing, so lo is the number of entries below bits. */
     let step = |lo: usize, half: usize| {
         let k = lo + half;
