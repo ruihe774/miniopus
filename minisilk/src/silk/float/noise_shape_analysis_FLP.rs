@@ -20,10 +20,10 @@ use crate::silk::tuning_parameters::*;
 #[inline(always)]
 fn warped_gain(coefs: &[f32], mut lambda: f32, order: i32) -> f32 {
     lambda = -lambda;
-    let mut gain = coefs[(order - 1) as usize];
+    let mut gain = coefs.at((order - 1) as usize);
     let mut i = order - 2;
     while i >= 0 {
-        gain = lambda * gain + coefs[i as usize];
+        gain = lambda * gain + coefs.at(i as usize);
         i -= 1;
     }
     1.0f32 / (1.0f32 - lambda * gain)
@@ -38,11 +38,11 @@ fn warped_true2monic_coefs(coefs: &mut [f32], lambda: f32, limit: f32, order: i3
 
     /* Convert to monic coefficients */
     for i in (1..order).rev() {
-        coefs[i - 1] -= lambda * coefs[i];
+        *coefs.at_mut(i - 1) -= lambda * coefs.at(i);
     }
-    let mut gain = (1.0f32 - lambda * lambda) / (1.0f32 + lambda * coefs[0]);
+    let mut gain = (1.0f32 - lambda * lambda) / (1.0f32 + lambda * coefs.at(0));
     for i in 0..order {
-        coefs[i] *= gain;
+        *coefs.at_mut(i) *= gain;
     }
 
     /* Limit */
@@ -50,7 +50,7 @@ fn warped_true2monic_coefs(coefs: &mut [f32], lambda: f32, limit: f32, order: i3
         /* Find maximum absolute value */
         let mut maxabs = -1.0f32;
         for i in 0..order {
-            let tmp = silk_abs_float(coefs[i]);
+            let tmp = silk_abs_float(coefs.at(i));
             if tmp > maxabs {
                 maxabs = tmp;
                 ind = i;
@@ -63,11 +63,11 @@ fn warped_true2monic_coefs(coefs: &mut [f32], lambda: f32, limit: f32, order: i3
 
         /* Convert back to true warped coefficients */
         for i in 1..order {
-            coefs[i - 1] += lambda * coefs[i];
+            *coefs.at_mut(i - 1) += lambda * coefs.at(i);
         }
         gain = 1.0f32 / gain;
         for i in 0..order {
-            coefs[i] *= gain;
+            *coefs.at_mut(i) *= gain;
         }
 
         /* Apply bandwidth expansion */
@@ -76,11 +76,11 @@ fn warped_true2monic_coefs(coefs: &mut [f32], lambda: f32, limit: f32, order: i3
 
         /* Convert to monic warped coefficients */
         for i in (1..order).rev() {
-            coefs[i - 1] -= lambda * coefs[i];
+            *coefs.at_mut(i - 1) -= lambda * coefs.at(i);
         }
-        gain = (1.0f32 - lambda * lambda) / (1.0f32 + lambda * coefs[0]);
+        gain = (1.0f32 - lambda * lambda) / (1.0f32 + lambda * coefs.at(0));
         for i in 0..order {
-            coefs[i] *= gain;
+            *coefs.at_mut(i) *= gain;
         }
     }
     debug_assert!(false);
@@ -94,7 +94,7 @@ fn limit_coefs(coefs: &mut [f32], limit: f32, order: i32) {
         /* Find maximum absolute value */
         let mut maxabs = -1.0f32;
         for i in 0..order as usize {
-            let tmp = silk_abs_float(coefs[i]);
+            let tmp = silk_abs_float(coefs.at(i));
             if tmp > maxabs {
                 maxabs = tmp;
                 ind = i;
@@ -173,7 +173,7 @@ pub fn silk_noise_shape_analysis_FLP(
         let mut pitch_res_ptr = 0usize;
         let nSegs = silk_SMULBB(SUB_FRAME_LENGTH_MS, MAX_NB_SUBFR) / 2;
         for k in 0..nSegs {
-            let nrg = nSamples as f32 + silk_energy_FLP(&pitch_res[pitch_res_ptr..], nSamples) as f32;
+            let nrg = nSamples as f32 + silk_energy_FLP(pitch_res.rg(pitch_res_ptr..), nSamples) as f32;
             let log_energy = silk_log2(nrg as f64);
             if k > 0 {
                 energy_variation += silk_abs_float(log_energy - log_energy_prev);
@@ -209,11 +209,11 @@ pub fn silk_noise_shape_analysis_FLP(
         let flat_part = (FS_KHZ * 3) as usize;
         let slope_part = ((sCmn.shapeWinLength - flat_part as i32) / 2) as usize;
 
-        silk_apply_sine_window_FLP(&mut x_windowed, &x_buf[x_ptr..], 1, slope_part as i32);
+        silk_apply_sine_window_FLP(&mut x_windowed, x_buf.rg(x_ptr..), 1, slope_part as i32);
         let mut shift = slope_part;
-        x_windowed[shift..shift + flat_part].copy_from_slice(&x_buf[x_ptr + shift..x_ptr + shift + flat_part]);
+        x_windowed.rg_mut(shift..shift + flat_part).copy_from_slice(x_buf.rg(x_ptr + shift..x_ptr + shift + flat_part));
         shift += flat_part;
-        silk_apply_sine_window_FLP(&mut x_windowed[shift..], &x_buf[x_ptr + shift..], 2, slope_part as i32);
+        silk_apply_sine_window_FLP(x_windowed.rg_mut(shift..), x_buf.rg(x_ptr + shift..), 2, slope_part as i32);
 
         /* Update pointer: next LPC analysis block */
         x_ptr += MAX_SUB_FRAME_LENGTH as usize;
@@ -231,7 +231,7 @@ pub fn silk_noise_shape_analysis_FLP(
 
         /* Convert correlations to prediction coefficients, and compute residual energy */
         let nrg = silk_schur_FLP(&mut rc, &auto_corr, order);
-        let AR = &mut psEncCtrl.AR[k * MAX_SHAPE_LPC_ORDER as usize..(k + 1) * MAX_SHAPE_LPC_ORDER as usize];
+        let AR = psEncCtrl.AR.rg_mut(k * MAX_SHAPE_LPC_ORDER as usize..(k + 1) * MAX_SHAPE_LPC_ORDER as usize);
         silk_k2a_FLP(AR, &rc, order);
         psEncCtrl.Gains[k] = crate::silk::float::sigproc_flp::sqrt(nrg as f64) as f32;
 
