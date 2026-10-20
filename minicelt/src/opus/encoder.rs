@@ -40,7 +40,6 @@
 //! contents are clobbered. It has room for `channels * (960 + overlap)` samples: this keeps
 //! those two buffers (8640 bytes for stereo) out of the pseudostack.
 
-use crate::celt::arch::Ix;
 use crate::celt::arch::{IMIN, celt_isnan};
 use crate::celt::celt_encoder::{CELTEncoder, celt_encode_with_ec, celt_encoder_init};
 use crate::celt::entcode::{ec_enc, ec_tell};
@@ -116,7 +115,7 @@ fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
     if channels == 2 {
         let mut m0 = hp_mem[0];
         let mut m2 = hp_mem[2];
-        for f in buf.rg_mut(..2 * FRAME_SIZE as usize).chunks_exact_mut(2) {
+        for f in buf[..2 * FRAME_SIZE as usize].chunks_exact_mut(2) {
             let (x0, x1) = (f[0], f[1]);
             let out0 = x0 - m0;
             let out1 = x1 - m2;
@@ -129,7 +128,7 @@ fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
         hp_mem[2] = m2;
     } else {
         let mut m0 = hp_mem[0];
-        for v in buf.rg_mut(..FRAME_SIZE as usize) {
+        for v in &mut buf[..FRAME_SIZE as usize] {
             let x = *v;
             let y = x - m0;
             m0 = coef * x + crate::celt::arch::VERY_SMALL + coef2 * m0;
@@ -144,7 +143,7 @@ fn stereo_fade(buf: &mut [f32], g1: f32, g2: f32) {
     let overlap = modes::overlap as usize;
     let g1 = 1.0f32 - g1;
     let g2 = 1.0f32 - g2;
-    let buf = buf.rg_mut(..2 * FRAME_SIZE as usize);
+    let buf = &mut buf[..2 * FRAME_SIZE as usize];
     let mut i = 0usize;
     while i < overlap {
         let mut w = modes::window[i];
@@ -301,13 +300,12 @@ impl OpusEncoder {
     /// and must hold `channels * IN_BUF_FRAME` samples. `lsb_depth` is the depth of the
     /// source (24 for float input; 16 for `opus_encode` of 16-bit input scaled to +-1).
     /// Returns the packet length (1..=1276 bytes at `data`) or a negative Opus error code.
-    // IX-HARD: `bandwidth_thresholds.at(2 * (bandwidth - MEDIUMBAND) (+ 1))`: `bandwidth` is decided at run time.
     pub fn encode_float(&mut self, buf: &mut [f32], data: &mut [u8; PACKET_SIZE_CAP], lsb_depth: i32) -> i32 {
         if self.channels == 0 {
             return OPUS_BAD_ARG;
         }
         debug_assert!(buf.len() >= (IN_BUF_FRAME * self.channels) as usize);
-        let pcm = buf.rg_mut(..(FRAME_SIZE * self.channels) as usize);
+        let pcm = &mut buf[..(FRAME_SIZE * self.channels) as usize];
         self.rangeFinal = 0;
         /* "Cannot encode 100 ms in 1 byte" does not apply to 20 ms frames. */
 
@@ -374,8 +372,8 @@ impl OpusEncoder {
         {
             let mut bandwidth = OPUS_BANDWIDTH_FULLBAND;
             loop {
-                let mut threshold = bandwidth_thresholds.at((2 * (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND)) as usize);
-                let hysteresis = bandwidth_thresholds.at((2 * (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND) + 1) as usize);
+                let mut threshold = bandwidth_thresholds[(2 * (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND)) as usize];
+                let hysteresis = bandwidth_thresholds[(2 * (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND) + 1) as usize];
                 if self.first == 0 {
                     if self.auto_bandwidth >= bandwidth {
                         threshold -= hysteresis;
@@ -440,7 +438,7 @@ impl OpusEncoder {
 
         /* No delay_buffer prefix: total_buffer == 0. The variable HP smoothing only feeds
         the VOIP high-pass. */
-        let pcm = buf.rg_mut(..(FRAME_SIZE * self.channels) as usize);
+        let pcm = &mut buf[..(FRAME_SIZE * self.channels) as usize];
         dc_reject(pcm, &mut self.hp_mem, self.channels);
 
         /* float_api */
@@ -485,7 +483,7 @@ impl OpusEncoder {
                 let mut g2 = stereoWidth_Q14 as f32;
                 g1 *= 1.0f32 / 16384.0f32;
                 g2 *= 1.0f32 / 16384.0f32;
-                stereo_fade(buf.rg_mut(..(2 * FRAME_SIZE) as usize), g1, g2);
+                stereo_fade(&mut buf[..(2 * FRAME_SIZE) as usize], g1, g2);
                 self.hybrid_stereo_width_Q14 = stereoWidth_Q14 as i16;
             }
         }
