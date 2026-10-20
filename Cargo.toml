@@ -7,7 +7,7 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"
-strip = "symbols"
+strip = "none" # scripts/build.sh runs wasm-opt on release, which needs the target_features section and strips
 
 # Release code with debug_assert!s and integer overflow checks, for the compare.ts tests.
 [profile.checked]
