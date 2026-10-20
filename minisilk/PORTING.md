@@ -83,9 +83,25 @@ One Rust module per C file, with the C file name (`silk/NLSF_VQ.c` →
   make the result depend on the optimizer).
 - C `(opus_int)x` on a float truncates; Rust `x as i32` truncates and saturates.
   `silk_float2int`/`float2int` round half to even (`f32.nearest`).
-- Arrays: prefer slices (`&[i16]`, `&mut [f32]`). Where C uses negative
-  offsets or pointer arithmetic into a larger buffer, pass the buffer plus an
-  offset, or use raw pointers; `unsafe` is allowed anywhere.
+- Arrays: prefer slices (`&[i16]`, `&mut [f32]`), indexed with `macros::Ix` (`x.at(i)`,
+  `*x.at_mut(i) = v`, `x.rg(a..b)`, `x.rg_mut(a..b)`: unchecked in release, checked in the
+  `checked` profile, as minicelt's `arch::Ix`; fixed arrays work through method-call
+  auto-unsizing). New code should use it and run the `checked` tests. Plain `x[i]` stays where
+  the index is a compile-time-bounded loop variable or constant (the compiler already drops the
+  check) and in the SIMD tails that use raw pointers. For 2D arrays only the innermost index
+  goes through `Ix` (`*m[j].at_mut(i)`), since `m.at(j)` would copy the row. Where C uses
+  negative offsets or pointer arithmetic into a larger buffer, pass the buffer plus an offset,
+  or use raw pointers; `unsafe` is allowed anywhere.
+- Bounds checks: indexing with run-time indices goes through `macros::Ix` (the trait lives in
+  `silk::macros`, which every module already imports; minisilk has no `arch` module), unchecked
+  like C in release and checked in the `checked` profile (debug assertions). Converting the
+  files with run-time-indexed slices (`NSQ`, `NSQ_del_dec`, `noise_shape_analysis_FLP`,
+  `pitch_analysis_core_FLP`, `burg_modified_FLP`, `NLSF_del_dec_quant`, `encode_pulses`,
+  `wrappers_FLP`, `NLSF2A`, `A2NLSF`, `corrMatrix_FLP`) removed about 3.1 KB of the release wasm
+  (73822 -> 70732 bytes for WASM 2.0, 73408 -> 71007 for 3.0) at no change in behaviour.
+  Files whose loops have constant bounds (`VAD`, `encode_frame_FLP`) gained nothing and stay
+  as they were. The remaining files are expected to give a few hundred bytes each at most.
+  New code should use it, and run the `checked` tests.
 - `silk_assert`/`celt_assert` → `debug_assert!`. Drop `arch` parameters.
 - Plain C arithmetic uses plain Rust operators, so debug builds trap on
   overflow. Use the `_ovflw` macros / `wrapping_*` exactly where C does. If C
