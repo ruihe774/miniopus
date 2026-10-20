@@ -1,7 +1,6 @@
 //! Port of celt/pitch.c and the float kernels of celt/wasm/pitch_wasm.c
 //! (opus_val16 = opus_val32 = f32).
 
-use super::arch::Ix;
 use core::arch::wasm32::*;
 
 use super::arch::{MAX16, MAX32};
@@ -442,7 +441,6 @@ static second_check: [i32; 16] = [0, 0, 3, 2, 3, 2, 5, 2, 3, 2, 3, 2, 5, 2, 3, 2
 
 /// `x` is the start of the buffer; C's `x += maxperiod` (halved) is applied internally, and
 /// the function reads `x[0 .. maxperiod/2 + N/2]` (no data before the buffer start).
-// IX-HARD: `yy_lookup.at(T0 | T1 | T1b)` and `x.rg(base - T1 ..)`: periods searched at run time.
 pub fn remove_doubling(
     x: &[f32],
     mut maxperiod: i32,
@@ -477,7 +475,8 @@ pub fn remove_doubling(
     T = *T0_;
     T0 = T;
     let yy_lookup = st.alloc::<f32>(maxperiod as usize + 1);
-    dual_inner_prod(x.rg(base..), x.rg(base..), x.rg(base - T0 as usize..), N, &mut xx, &mut xy);
+    let xb = &x[base..];
+    dual_inner_prod(xb, xb, &x[base - T0 as usize..], N, &mut xx, &mut xy);
     yy_lookup[0] = xx;
     let mut yy = xx;
     let xw = &x[..base + nn];
@@ -485,7 +484,7 @@ pub fn remove_doubling(
         yy = yy + xw[base - i] * xw[base - i] - xw[base + nn - i] * xw[base + nn - i];
         yy_lookup[i] = MAX32(0.0, yy);
     }
-    yy = yy_lookup.at(T0 as usize);
+    yy = yy_lookup[T0 as usize];
     let mut best_xy = xy;
     let mut best_yy = yy;
     let mut g = compute_pitch_gain(xy, xx, yy);
@@ -508,15 +507,15 @@ pub fn remove_doubling(
             T1b = (2 * second_check[k as usize] * T0 + k) / (2 * k);
         }
         dual_inner_prod(
-            x.rg(base..),
-            x.rg(base - T1 as usize..),
-            x.rg(base - T1b as usize..),
+            xb,
+            &x[base - T1 as usize..],
+            &x[base - T1b as usize..],
             N,
             &mut xy,
             &mut xy2,
         );
         xy = 0.5 * (xy + xy2);
-        yy = 0.5 * (yy_lookup.at(T1 as usize) + yy_lookup.at(T1b as usize));
+        yy = 0.5 * (yy_lookup[T1 as usize] + yy_lookup[T1b as usize]);
         let g1 = compute_pitch_gain(xy, xx, yy);
         let cont: f32;
         if (T1 - prev_period).abs() <= 1 {
