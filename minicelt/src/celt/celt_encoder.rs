@@ -1324,7 +1324,6 @@ pub fn run_prefilter(
 /// no activity/tonality terms), `pitch_change` (only used with analysis), `lfe`,
 /// `has_surround_mask`, `surround_masking` (all 0), `enable_qext`. The CBR second call
 /// (`!vbr_rate`, hybrid) does not exist.
-// IX-HARD: `eBands.at(coded_bands | intensity | coded_stereo_bands)`: band counts chosen by the encoder.
 pub fn compute_vbr(
     base_target: i32,
     bitrate: i32,
@@ -1344,9 +1343,14 @@ pub fn compute_vbr(
     let eBands = modes::eBands;
 
     let coded_bands = if lastCodedBands != 0 { lastCodedBands } else { nbEBands };
-    let mut coded_bins: i32 = (eBands.at(coded_bands as usize) as i32) << LM;
+    /* the band counts are at most nbEBands */
+    debug_assert!(coded_bands <= nbEBands && intensity <= nbEBands);
+    let coded_stereo_bands = IMIN(intensity, coded_bands);
+    /* (clamped to the table so that no check is needed; the counts never exceed it) */
+    let edge = |i: i32| (eBands[(i as usize).min(nbEBands as usize)] as i32) << LM;
+    let mut coded_bins: i32 = edge(coded_bands);
     if C == 2 {
-        coded_bins += (eBands.at(IMIN(intensity, coded_bands) as usize) as i32) << LM;
+        coded_bins += edge(coded_stereo_bands);
     }
 
     target = base_target;
@@ -1354,8 +1358,7 @@ pub fn compute_vbr(
     /* (analysis->valid is always 0: no activity reduction) */
     /* Stereo savings */
     if C == 2 {
-        let coded_stereo_bands = IMIN(intensity, coded_bands);
-        let coded_stereo_dof: i32 = ((eBands.at(coded_stereo_bands as usize) as i32) << LM) - coded_stereo_bands;
+        let coded_stereo_dof: i32 = edge(coded_stereo_bands) - coded_stereo_bands;
         /* Maximum fraction of the bits we can save if the signal is mono. */
         let max_frac: f32 = (0.8f32 * coded_stereo_dof as f32) / coded_bins as f32;
         stereo_saving = MIN16(stereo_saving, 1.0);
@@ -1373,7 +1376,7 @@ pub fn compute_vbr(
     /* (analysis->valid and surround masks are always off) */
 
     {
-        let bins: i32 = (eBands.at(nbEBands as usize - 2) as i32) << LM;
+        let bins: i32 = edge(nbEBands - 2);
         let mut floor_depth: i32 = (((C * bins) << BITRES) as f32 * maxDepth) as i32;
         floor_depth = IMAX(floor_depth, target >> 2);
         target = IMIN(target, floor_depth);
