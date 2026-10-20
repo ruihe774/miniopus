@@ -4,7 +4,6 @@
 //! In the float build `celt_inner_prod_norm` and `celt_inner_prod_norm_shift` are
 //! `celt_inner_prod`, and `norm_scaleup`/`norm_scaledown` are no-ops.
 
-use super::arch::Ix;
 use core::arch::wasm32::*;
 
 use super::arch::EPSILON;
@@ -36,8 +35,6 @@ fn exp_rotation1(X: &mut [f32], len: i32, stride: i32, c: f32, s: f32) {
     }
 }
 
-// IX-HARD: `X.rg_mut(i * len..)`: `X` has no known length; `X[..stride * len].chunks_exact_mut(len)` measured
-// +82 bytes, +2 `unreachable` (slice check and zero-length check). The spread-factor lookup is a `match`.
 pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, spread: i32) {
     let mut stride2: i32 = 0;
 
@@ -68,8 +65,7 @@ pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, 
     /*NOTE: As a minor optimization, we could be passing around log2(B), not B, for both this and for
     extract_collapse_mask().*/
     len = celt_udiv(len as u32, stride as u32) as i32;
-    for i in 0..stride {
-        let x = X.rg_mut((i * len) as usize..);
+    for x in X[..(stride * len) as usize].chunks_exact_mut(len as usize) {
         if dir < 0 {
             if stride2 != 0 {
                 exp_rotation1(x, len, stride2, s, c);
@@ -85,7 +81,6 @@ pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, 
 }
 
 /// Normalizes the decoded integer pvq codeword to unit norm.
-// IX-EASY: re-slice `X` and `iy` to `N`, or zip them.
 fn normalise_residual(iy: &[i32], X: &mut [f32], N: i32, Ryy: f32, gain: f32) {
     let t = Ryy;
     let g = celt_rsqrt_norm32(t) * gain;
@@ -94,9 +89,6 @@ fn normalise_residual(iy: &[i32], X: &mut [f32], N: i32, Ryy: f32, gain: f32) {
     }
 }
 
-// IX-HARD: tried `iy[..B * N0].chunks_exact(N0)` and `iy.chunks(N0.max(1)).take(B)`: `iy` has no known length
-// here, so the first adds a slice check and a zero-divisor check (+110 bytes, +2 `unreachable`), the second
-// is check-free but still +35 bytes.
 fn extract_collapse_mask(iy: &[i32], N: i32, B: i32) -> u32 {
     if B <= 1 {
         return 1;
@@ -105,11 +97,8 @@ fn extract_collapse_mask(iy: &[i32], N: i32, B: i32) -> u32 {
     exp_rotation().*/
     let N0 = celt_udiv(N as u32, B as u32) as usize;
     let mut collapse_mask: u32 = 0;
-    for i in 0..B as usize {
-        let mut tmp: u32 = 0;
-        for j in 0..N0 {
-            tmp |= iy.at(i * N0 + j) as u32;
-        }
+    for (i, block) in iy[..B as usize * N0].chunks_exact(N0).enumerate() {
+        let tmp = block.iter().fold(0u32, |t, &v| t | v as u32);
         collapse_mask |= ((tmp != 0) as u32) << i;
     }
     collapse_mask
@@ -329,8 +318,6 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
 /// the pitch and a combination of pulses such that its norm is still equal
 /// to 1. This is the function that will typically require the most CPU.
 /// Returns a mask indicating which blocks in the band received pulses.
-// IX-HARD: the one site is `iy.rg(..N)`; `iy` is `alloc(N + 3)` but the compiler does not connect the two
-// lengths (`&iy[..N]` measured +33 bytes, +1 `unreachable`).
 pub fn alg_quant(X: &mut [f32], N: i32, K: i32, spread: i32, B: i32, enc: &mut ec_enc, gain: f32, resynth: i32) -> u32 {
     let st = stack::save();
 
@@ -344,7 +331,7 @@ pub fn alg_quant(X: &mut [f32], N: i32, K: i32, spread: i32, B: i32, enc: &mut e
 
     let yy = op_pvq_search(X, iy, K, N);
     let collapse_mask = extract_collapse_mask(iy, N, B);
-    encode_pulses(iy.rg(..N as usize), N, K, enc);
+    encode_pulses(&iy[..N as usize], N, K, enc);
     if resynth != 0 {
         normalise_residual(iy, X, N, yy, gain);
     }
@@ -356,7 +343,6 @@ pub fn alg_quant(X: &mut [f32], N: i32, K: i32, spread: i32, B: i32, enc: &mut e
     collapse_mask
 }
 
-// IX-EASY: `X[..N]` re-slice.
 pub fn renormalise_vector(X: &mut [f32], N: i32, gain: f32) {
     let E: f32 = EPSILON + celt_inner_prod(X, X, N);
     let t = E;
@@ -368,7 +354,6 @@ pub fn renormalise_vector(X: &mut [f32], N: i32, gain: f32) {
     /*return celt_sqrt(E);*/
 }
 
-// IX-EASY: `X[..N]`, `Y[..N]` re-slice, or zip.
 pub fn stereo_itheta(X: &[f32], Y: &[f32], stereo: i32, N: i32) -> i32 {
     let mut Emid: f32 = 0.0;
     let mut Eside: f32 = 0.0;

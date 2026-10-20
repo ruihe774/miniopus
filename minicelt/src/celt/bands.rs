@@ -346,17 +346,16 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     X.rg_mut(..N).copy_from_slice(tmp);
 }
 
-// IX-HARD: `X` has no known length. `X[..2 * stride * N0].chunks_exact_mut(2 * stride)` + `split_at_mut(stride)`
-// measured +149 bytes, +3 `unreachable` (slice check, zero-chunk check, split check).
 pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     N0 >>= 1;
     let stride = stride as usize;
-    for i in 0..stride {
-        for j in 0..N0 as usize {
-            let tmp1 = 0.70710678f32 * X.at(stride * 2 * j + i);
-            let tmp2 = 0.70710678f32 * X.at(stride * (2 * j + 1) + i);
-            *X.at_mut(stride * 2 * j + i) = tmp1 + tmp2;
-            *X.at_mut(stride * (2 * j + 1) + i) = tmp1 - tmp2;
+    for pair in X[..2 * stride * N0 as usize].chunks_exact_mut(2 * stride) {
+        let (a, b) = pair.split_at_mut(stride);
+        for (a, b) in a.iter_mut().zip(b) {
+            let tmp1 = 0.70710678f32 * *a;
+            let tmp2 = 0.70710678f32 * *b;
+            *a = tmp1 + tmp2;
+            *b = tmp1 - tmp2;
         }
     }
 }
