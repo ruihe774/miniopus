@@ -63,9 +63,8 @@ pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
             i += 4;
         }
         let mut xy = wasm_f32x4_hsum(f32x4_add(sum0, sum1));
-        while i < n {
-            xy = xy + x.at(i) * y.at(i);
-            i += 1;
+        for (a, b) in x[i..n].iter().zip(&y[i..n]) {
+            xy = xy + a * b;
         }
         xy
     }
@@ -188,10 +187,10 @@ pub fn dual_inner_prod(x: &[f32], y01: &[f32], y02: &[f32], N: i32, xy1: &mut f3
         }
         let mut xy01 = wasm_f32x4_hsum(f32x4_add(sum1a, sum1b));
         let mut xy02 = wasm_f32x4_hsum(f32x4_add(sum2a, sum2b));
-        while i < n {
-            xy01 = xy01 + x.at(i) * y01.at(i);
-            xy02 = xy02 + x.at(i) * y02.at(i);
-            i += 1;
+        let (xt, y1t, y2t) = (&x[i..n], &y01[i..n], &y02[i..n]);
+        for j in 0..xt.len() {
+            xy01 = xy01 + xt[j] * y1t[j];
+            xy02 = xy02 + xt[j] * y2t[j];
         }
         *xy1 = xy01;
         *xy2 = xy02;
@@ -304,8 +303,8 @@ fn find_best_pitch(xcorr: &[f32], y: &[f32], len: i32, max_pitch: i32, best_pitc
 fn celt_fir5(x: &mut [f32], num: &[f32; 5], N: i32) {
     let [num0, num1, num2, num3, num4] = *num;
     let (mut mem0, mut mem1, mut mem2, mut mem3, mut mem4) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
-    for i in 0..N as usize {
-        let mut sum: f32 = x.at(i);
+    for v in &mut x[..N as usize] {
+        let mut sum: f32 = *v;
         sum = sum + num0 * mem0;
         sum = sum + num1 * mem1;
         sum = sum + num2 * mem2;
@@ -315,8 +314,8 @@ fn celt_fir5(x: &mut [f32], num: &[f32; 5], N: i32) {
         mem3 = mem2;
         mem2 = mem1;
         mem1 = mem0;
-        mem0 = x.at(i);
-        *x.at_mut(i) = sum;
+        mem0 = *v;
+        *v = sum;
     }
 }
 
@@ -328,6 +327,8 @@ fn celt_fir5(x: &mut [f32], num: &[f32; 5], N: i32) {
 pub fn pitch_downsample(hist: &[f32], new: &[f32], new_off: usize, new_stride: usize, x_lp: &mut [f32], len: i32, C: i32, factor: i32) {
     debug_assert!(C == 1 || C == 2);
     const MP: usize = 1024; /* COMBFILTER_MAXPERIOD */
+    // IX-HARD: strided, computed indices (`c * stride + j - MP`) into two buffers: not provable from the
+    // slice lengths, so these stay on `Ix`.
     let x = |c: usize, j: usize| if j < MP { hist.at(c * MP + j) } else { new.at(new_off + c * new_stride + j - MP) };
     let mut ac = [0.0f32; 5];
     let mut tmp: f32 = 1.0;
@@ -351,24 +352,24 @@ pub fn pitch_downsample(hist: &[f32], new: &[f32], new_off: usize, new_stride: u
     _celt_autocorr(x_lp, &mut ac, 4, len);
 
     /* Noise floor -40 dB */
-    *ac.at_mut(0) *= 1.0001;
+    ac[0] *= 1.0001;
     /* Lag windowing */
     for i in 1..=4usize {
         /*ac[i] *= exp(-.5*(2*M_PI*.002*i)*(2*M_PI*.002*i));*/
-        *ac.at_mut(i) -= ac.at(i) * (0.008 * i as f32) * (0.008 * i as f32);
+        ac[i] -= ac[i] * (0.008 * i as f32) * (0.008 * i as f32);
     }
 
     _celt_lpc(&mut lpc, &ac, 4);
     for i in 0..4 {
         tmp = 0.9 * tmp;
-        *lpc.at_mut(i) = lpc.at(i) * tmp;
+        lpc[i] = lpc[i] * tmp;
     }
     /* Add a zero */
-    *lpc2.at_mut(0) = lpc.at(0) + 0.8;
-    *lpc2.at_mut(1) = lpc.at(1) + c1 * lpc.at(0);
-    *lpc2.at_mut(2) = lpc.at(2) + c1 * lpc.at(1);
-    *lpc2.at_mut(3) = lpc.at(3) + c1 * lpc.at(2);
-    *lpc2.at_mut(4) = c1 * lpc.at(3);
+    lpc2[0] = lpc[0] + 0.8;
+    lpc2[1] = lpc[1] + c1 * lpc[0];
+    lpc2[2] = lpc[2] + c1 * lpc[1];
+    lpc2[3] = lpc[3] + c1 * lpc[2];
+    lpc2[4] = c1 * lpc[3];
     celt_fir5(x_lp, &lpc2, len);
 }
 

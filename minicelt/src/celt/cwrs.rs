@@ -34,19 +34,21 @@ pub fn init_cwrs() {
     // SAFETY: nothing reads the table while it is rebuilt (init only).
     let data = unsafe { &mut *CELT_PVQ_U_DATA.0.get() };
     let mut row = [0u32; 177];
-    *row.at_mut(0) = 1;
+    row[0] = 1;
     for a in 0..15usize {
         if a > 0 {
-            let mut diag = row.at(0);
-            *row.at_mut(0) = 0;
+            let mut diag = row[0];
+            row[0] = 0;
             for b in 1..177 {
-                let old = row.at(b);
-                *row.at_mut(b) = old.wrapping_add(row.at(b - 1)).wrapping_add(diag);
+                let old = row[b];
+                row[b] = old.wrapping_add(row[b - 1]).wrapping_add(diag);
                 diag = old;
             }
         }
-        for b in a..=CELT_PVQ_U_LAST.at(a) as usize {
-            *data.at_mut(CELT_PVQ_U_ROW.at(a) as usize + b) = row.at(b);
+        // IX-HARD: `ROW[a] + b` is table-driven (the stored rows overlap), so the compiler can't bound it
+        // from `data.len()`; `Ix` stays for the write.
+        for b in a..=CELT_PVQ_U_LAST[a] as usize {
+            *data.at_mut(CELT_PVQ_U_ROW[a] as usize + b) = row[b];
         }
     }
 }
@@ -54,6 +56,8 @@ pub fn init_cwrs() {
 /*U(N,K) = U(K,N) := N>0?K>0?U(N-1,K)+U(N,K-1)+U(N-1,K-1):0:K>0?1:0*/
 #[inline(always)]
 fn CELT_PVQ_U(_n: i32, _k: i32) -> u32 {
+    // IX-HARD: both indices come from `n`/`k` through the ROW table (`ROW[min] + max`), so there is no
+    // length the compiler could prove them against: keep `Ix` (this is on the PVQ encode path).
     // SAFETY: init_cwrs ran before the first encode; the table is only read here.
     unsafe { (*CELT_PVQ_U_DATA.0.get()).at(CELT_PVQ_U_ROW.at(IMIN(_n, _k) as usize) as usize + IMAX(_n, _k) as usize) }
 }

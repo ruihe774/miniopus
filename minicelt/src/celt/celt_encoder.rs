@@ -203,6 +203,8 @@ pub fn transient_analysis(
         let mut mem1: f32 = 0.0;
         /* High-pass filter: (1 - 2*z^-1 + z^-2) / (1 - z^-1 + .5*z^-2) */
         for i in 0..len as usize {
+            // IX-HARD: `c * len + i` into the interleaved channel buffer: the channel offset is computed, so
+            // this stays on `Ix` (as do most of the per-band and per-channel loops in this file).
             let x = in_.at(i + (c * len) as usize);
             let y = mem0 + x;
             /* Original code:

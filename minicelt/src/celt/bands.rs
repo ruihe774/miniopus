@@ -95,6 +95,8 @@ pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], end: i32, C: i32) {
     let N = modes::shortMdctSize << LM;
     for c in 0..C {
         for i in 0..end as usize {
+            // IX-HARD: band offsets come from the `eBands` table scaled by `LM`: the ranges depend on the mode
+            // data, not on any slice length, so they stay on `Ix`.
             let off = (c * N + ((eBands.at(i) as i32) << LM)) as usize;
             let len = ((eBands.at(i + 1) as i32) - (eBands.at(i) as i32)) << LM;
             let sum: f32 = 1e-27f32 + celt_inner_prod(X.rg(off..), X.rg(off..), len);

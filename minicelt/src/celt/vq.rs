@@ -18,22 +18,21 @@ use crate::stack;
 fn exp_rotation1(X: &mut [f32], len: i32, stride: i32, c: f32, s: f32) {
     let ms = -s;
     let stride = stride as usize;
+    // One check up front; the loops below index below `len`.
+    let X = &mut X[..len as usize];
     let mut i = 0usize;
-    while (i as i32) < len - stride as i32 {
-        let x1 = X.at(i);
-        let x2 = X.at(i + stride);
-        *X.at_mut(i + stride) = c * x2 + s * x1;
-        *X.at_mut(i) = c * x1 + ms * x2;
+    while i + stride < X.len() {
+        let x1 = X[i];
+        let x2 = X[i + stride];
+        X[i + stride] = c * x2 + s * x1;
+        X[i] = c * x1 + ms * x2;
         i += 1;
     }
-    let mut i = len - 2 * stride as i32 - 1;
-    while i >= 0 {
-        let p = i as usize;
-        let x1 = X.at(p);
-        let x2 = X.at(p + stride);
-        *X.at_mut(p + stride) = c * x2 + s * x1;
-        *X.at_mut(p) = c * x1 + ms * x2;
-        i -= 1;
+    for p in (0..X.len().saturating_sub(2 * stride)).rev() {
+        let x1 = X[p];
+        let x2 = X[p + stride];
+        X[p + stride] = c * x2 + s * x1;
+        X[p] = c * x1 + ms * x2;
     }
 }
 

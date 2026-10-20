@@ -65,6 +65,8 @@ pub fn bitrev(shift: i32) -> &'static [i16] {
 
 /// compute_bitrev_table() of kiss_fft.c (`f` indexed from `fi`).
 fn compute_bitrev_table(Fout: i32, f: &mut [i16], mut fi: usize, fstride: usize, factors: &[i16]) {
+    // IX-HARD: `factors` is a (radix, count) list whose length depends on the mode, and `f`/`fi` advance by
+    // computed strides: nothing here lets the compiler bound the indices, so `Ix` stays.
     let p = factors.at(0) as i32;
     let m = factors.at(1) as i32;
     let mut Fout = Fout;
@@ -149,6 +151,9 @@ fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
     debug_assert!(m == 4);
     let mut o = 0usize;
     for _ in 0..N {
+        // IX-HARD: provable in principle (`f` has 8 elements, indices 0..8), but only if the optimizer
+        // folds `o + 8 - o`; `Fout.len() >= o + 8` is otherwise checked once per butterfly.
+        // The butterflies are the hot loop, so the plain-indexing conversion needs a benchmark.
         let f = Fout.rg_mut(o..o + 8);
         let mut t = f.at(4);
         *f.at_mut(4) = C_SUB(f.at(0), t);

@@ -1,6 +1,5 @@
 //! Port of celt/mathops.h and celt/mathops.c (float build, without FLOAT_APPROX).
 
-use super::arch::Ix;
 use super::arch::{MAX16, MAX32, MIN16};
 
 /// PI from celt/mathops.h (a double constant).
@@ -9,9 +8,9 @@ pub const PI: f64 = 3.1415926535897931;
 pub fn celt_maxabs16(x: &[f32], len: i32) -> f32 {
     let mut maxval: f32 = 0.0;
     let mut minval: f32 = 0.0;
-    for i in 0..len as usize {
-        maxval = MAX16(maxval, x.at(i));
-        minval = MIN16(minval, x.at(i));
+    for &v in &x[..len as usize] {
+        maxval = MAX16(maxval, v);
+        minval = MIN16(minval, v);
     }
     MAX32(maxval, -minval)
 }
@@ -118,7 +117,7 @@ pub fn celt_cos_norm(x: f32) -> f32 {
         /* |a| ~< pi/4: k_cos(a, 0) */
         let z = a * a;
         let w = z * z;
-        let r = z * (C.at(0) + z * (C.at(1) + z * C.at(2))) + w * w * (C.at(3) + z * (C.at(4) + z * C.at(5)));
+        let r = z * (C[0] + z * (C[1] + z * C[2])) + w * w * (C[3] + z * (C[4] + z * C[5]));
         let hz = 0.5 * z;
         let w = 1.0 - hz;
         (w + (((1.0 - w) - hz) + z * r)) as f32
@@ -129,7 +128,7 @@ pub fn celt_cos_norm(x: f32) -> f32 {
         let y1 = (z - y0) - PIO2_1T;
         let z = y0 * y0;
         let w = z * z;
-        let r = S.at(0) + z * (S.at(1) + z * S.at(2)) + z * w * (S.at(3) + z * S.at(4));
+        let r = S[0] + z * (S[1] + z * S[2]) + z * w * (S[3] + z * S[4]);
         let v = z * y0;
         (-(y0 - ((z * (0.5 * y1 - v * r) - y1) - v * S1))) as f32
     }
