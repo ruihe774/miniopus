@@ -181,16 +181,12 @@ static inv_table: [u8; 128] = [
     3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, //
 ];
 
-/// `in_` holds `C` channels of `len` samples each (`in_[c*len + i]`, i.e. the `in` buffer of
-/// celt_encode_with_ec with `len = N+overlap`). `*tf_chan` is only written when a channel's
+/// `in_` holds `C` channels of `len = N+overlap = 1080` samples each (`in_[c*len + i]`, i.e. the
+/// `in` buffer of celt_encode_with_ec). `*tf_chan` is only written when a channel's
 /// metric exceeds 0 (the caller initializes it); `*tf_estimate` is always written. Returns
 /// `is_transient`.
-// IX-HARD: `inv_table.at(id)`: `id` is computed from the signal energy ratio, no length to prove it
-// against. The `tmp` loops over `len2` (per-sample, a re-slice to `len2` would do) are left on `Ix` too:
-// converting them risks a check in a per-sample loop and was not tried.
 pub fn transient_analysis(
     in_: &[f32],
-    len: i32,
     C: i32,
     tf_estimate: &mut f32,
     tf_chan: &mut i32,
@@ -201,15 +197,16 @@ pub fn transient_analysis(
     /* Forward masking: 6.7 dB/ms. (The 3.3 dB/ms "weak transient" decay is hybrid only.) */
     let forward_decay: f32 = 0.0625;
     let sg = stack::save();
-    let tmp = sg.alloc::<f32>(len as usize);
-
-    let len2 = len / 2;
+    const LEN: usize = 960 + modes::overlap as usize;
+    const LEN2: usize = LEN / 2;
+    let tmp = sg.alloc::<f32>(LEN);
+    let len2 = LEN2 as i32;
     for c in 0..C {
         let mut unmask: i32;
         let mut mem0: f32 = 0.0;
         let mut mem1: f32 = 0.0;
         /* High-pass filter: (1 - 2*z^-1 + z^-2) / (1 - z^-1 + .5*z^-2) */
-        for (t, &x) in tmp.iter_mut().zip(&in_[(c * len) as usize..][..len as usize]) {
+        for (t, &x) in tmp.iter_mut().zip(&in_[c as usize * LEN..][..LEN]) {
             let y = mem0 + x;
             /* Original code:
             mem0 = mem1 + y - 2*x;
@@ -221,7 +218,7 @@ pub fn transient_analysis(
             *t = y;
         }
         /* First few samples are bad because we don't propagate the memory */
-        tmp.rg_mut(..12).fill(0.0);
+        tmp[..12].fill(0.0);
 
         let mut mean: f32 = 0.0;
         mem0 = 0.0;
@@ -239,10 +236,10 @@ pub fn transient_analysis(
         mem0 = 0.0;
         let mut maxE: f32 = 0.0;
         /* Backward pass to compute the pre-echo threshold */
-        for i in (0..len2 as usize).rev() {
+        for t in tmp[..LEN2].iter_mut().rev() {
             /* Backward masking: 13.9 dB/ms. */
-            mem0 = tmp.at(i) + 0.875 * mem0;
-            *tmp.at_mut(i) = 0.125 * mem0;
+            mem0 = *t + 0.875 * mem0;
+            *t = 0.125 * mem0;
             maxE = MAX16(maxE, 0.125 * mem0);
         }
 
@@ -265,15 +262,13 @@ pub fn transient_analysis(
         that crash on NaN since it could result in a worse issue later on. */
         debug_assert!(!tmp[0].is_nan());
         debug_assert!(!norm.is_nan());
-        let mut i = 12;
-        while i < len2 - 5 {
-            /* Do not round to nearest. floor() is a double operation, so MIN32/MAX32 compare doubles. */
-            let v: f64 = crate::celt::arch::floor64((64.0 * norm * (tmp.at(i as usize) + EPSILON)) as f64);
-            let v = if 127.0 < v { 127.0 } else { v };
-            let v = if 0.0 > v { 0.0 } else { v };
-            let id = v as i32;
-            unmask += inv_table.at(id as usize) as i32;
-            i += 4;
+        /* i = 12, 16, .., < len2-5 */
+        for q in tmp[12..LEN2 - 4].chunks_exact(4) {
+            /* Do not round to nearest. floor() is a double operation; the clamp to 0..127 (MIN32/MAX32 in
+            C) is done on the saturating integer conversion (also maps NaN to 0 like C's `(int)NaN` here) */
+            let v: f64 = crate::celt::arch::floor64((64.0 * norm * (q[0] + EPSILON)) as f64);
+            let id = (v as usize).min(127);
+            unmask += inv_table[id] as i32;
         }
         /* Normalize, compensate for the 1/4th of the sample and the factor of 6 in the inverse table */
         unmask = 64 * unmask * 4 / (6 * (len2 - 17));
@@ -1563,7 +1558,6 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     if st.complexity >= 1 {
         isTransient = transient_analysis(
             in_,
-            N + overlap,
             CC,
             &mut tf_estimate,
             &mut tf_chan,
