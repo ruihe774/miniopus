@@ -66,22 +66,19 @@ fn CELT_PVQ_V(_n: i32, _k: i32) -> u32 {
     CELT_PVQ_U(_n, _k) + CELT_PVQ_U(_n, _k + 1)
 }
 
-// IX-HARD: the iterator form (`split_last` + `rest.iter().enumerate().rev()`) is check-free but converted:
-// +0.2% encode time (+46 bytes).
 fn icwrs(_n: i32, _y: &[i32]) -> u32 {
     debug_assert!(_n >= 2);
-    let mut j = (_n - 1) as usize;
-    let mut i: u32 = (_y.at(j) < 0) as u32;
-    let mut k = _y.at(j).abs();
-    loop {
+    // One check up front; `j < y.len()` is then provable in the loop (no check in it).
+    let y = &_y[..(_n - 1) as usize + 1];
+    let mut j = y.len() - 1;
+    let mut i: u32 = (y[j] < 0) as u32;
+    let mut k = y[j].abs();
+    while j > 0 {
         j -= 1;
         i += CELT_PVQ_U(_n - j as i32, k);
-        k += _y.at(j).abs();
-        if _y.at(j) < 0 {
+        k += y[j].abs();
+        if y[j] < 0 {
             i += CELT_PVQ_U(_n - j as i32, k + 1);
-        }
-        if j == 0 {
-            break;
         }
     }
     i
