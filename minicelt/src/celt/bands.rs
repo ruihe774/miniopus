@@ -332,9 +332,10 @@ fn deinterleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     X.copy_from_slice(tmp);
 }
 
-// IX-HARD: `ordery_table.rg(stride - 2..)` (`stride` from the caller). The strided `X`/`tmp` accesses
-// (`j * stride + i < N`) have the shape of `haar1`, whose `chunks_exact_mut` form cost +1.0% encode time
-// (`haar1` is IX-HARD for that), so they are not converted.
+// IX-HARD: the strided `tmp` writes (`j * stride + i`). Tried (as in `deinterleave_hadamard`, looping over
+// the rows of X, `i = ordery_inv[r]`): `tmp.chunks_exact_mut(stride).zip(src)` with `t[i] = x`, check-free in
+// the loop but a division per row: +0.14%/+0.13% encode time (wasm2, min/median), +0.07% (wasm3), +40 B;
+// a `tmp.get_mut(k)`/break form (no division, one compare per sample): +0.21%/+0.17% (wasm2). Not converted.
 fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
