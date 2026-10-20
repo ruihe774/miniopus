@@ -2,6 +2,7 @@
 
 use crate::silk::float::energy_FLP::silk_energy_FLP;
 use crate::silk::float::inner_product_FLP::silk_inner_product_FLP;
+use crate::silk::macros::Ix;
 use crate::silk::float::schur_FLP::SILK_MAX_ORDER_LPC;
 use crate::silk::tuning_parameters::FIND_LPC_COND_FAC;
 
@@ -29,9 +30,9 @@ pub fn silk_burg_modified_FLP(
     /* Compute autocorrelations, added over subframes */
     let mut C0: f64 = silk_energy_FLP(x, nb_subfr * subfr_length);
     for s in 0..nsf {
-        let x_ptr = &x[s * sl..];
+        let x_ptr = x.rg(s * sl..);
         for n in 1..d + 1 {
-            C_first_row[n - 1] += silk_inner_product_FLP(x_ptr, &x_ptr[n..], subfr_length - n as i32);
+            *C_first_row.at_mut(n - 1) += silk_inner_product_FLP(x_ptr, x_ptr.rg(n..), subfr_length - n as i32);
         }
     }
     let mut C_last_row = C_first_row;
@@ -47,41 +48,41 @@ pub fn silk_burg_modified_FLP(
         /* Update C * Af */
         /* Update C * flipud(Af) (stored in reversed order) */
         for s in 0..nsf {
-            let x_ptr = &x[s * sl..];
-            let mut tmp1: f64 = x_ptr[n] as f64;
-            let mut tmp2: f64 = x_ptr[sl - n - 1] as f64;
+            let x_ptr = x.rg(s * sl..);
+            let mut tmp1: f64 = x_ptr.at(n) as f64;
+            let mut tmp2: f64 = x_ptr.at(sl - n - 1) as f64;
             for k in 0..n {
                 /* the products of two floats are computed in float */
-                C_first_row[k] -= (x_ptr[n] * x_ptr[n - k - 1]) as f64;
-                C_last_row[k] -= (x_ptr[sl - n - 1] * x_ptr[sl - n + k]) as f64;
-                let Atmp = Af[k];
-                tmp1 += x_ptr[n - k - 1] as f64 * Atmp;
-                tmp2 += x_ptr[sl - n + k] as f64 * Atmp;
+                *C_first_row.at_mut(k) -= (x_ptr.at(n) * x_ptr.at(n - k - 1)) as f64;
+                *C_last_row.at_mut(k) -= (x_ptr.at(sl - n - 1) * x_ptr.at(sl - n + k)) as f64;
+                let Atmp = Af.at(k);
+                tmp1 += x_ptr.at(n - k - 1) as f64 * Atmp;
+                tmp2 += x_ptr.at(sl - n + k) as f64 * Atmp;
             }
             for k in 0..=n {
-                CAf[k] -= tmp1 * x_ptr[n - k] as f64;
-                CAb[k] -= tmp2 * x_ptr[sl - n + k - 1] as f64;
+                *CAf.at_mut(k) -= tmp1 * x_ptr.at(n - k) as f64;
+                *CAb.at_mut(k) -= tmp2 * x_ptr.at(sl - n + k - 1) as f64;
             }
         }
-        let mut tmp1 = C_first_row[n];
-        let mut tmp2 = C_last_row[n];
+        let mut tmp1 = C_first_row.at(n);
+        let mut tmp2 = C_last_row.at(n);
         for k in 0..n {
-            let Atmp = Af[k];
-            tmp1 += C_last_row[n - k - 1] * Atmp;
-            tmp2 += C_first_row[n - k - 1] * Atmp;
+            let Atmp = Af.at(k);
+            tmp1 += C_last_row.at(n - k - 1) * Atmp;
+            tmp2 += C_first_row.at(n - k - 1) * Atmp;
         }
-        CAf[n + 1] = tmp1;
-        CAb[n + 1] = tmp2;
+        *CAf.at_mut(n + 1) = tmp1;
+        *CAb.at_mut(n + 1) = tmp2;
 
         /* Calculate nominator and denominator for the next order reflection (parcor) coefficient */
-        let mut num = CAb[n + 1];
+        let mut num = CAb.at(n + 1);
         let mut nrg_b = CAb[0];
         let mut nrg_f = CAf[0];
         for k in 0..n {
-            let Atmp = Af[k];
-            num += CAb[n - k] * Atmp;
-            nrg_b += CAb[k + 1] * Atmp;
-            nrg_f += CAf[k + 1] * Atmp;
+            let Atmp = Af.at(k);
+            num += CAb.at(n - k) * Atmp;
+            nrg_b += CAb.at(k + 1) * Atmp;
+            nrg_f += CAf.at(k + 1) * Atmp;
         }
         debug_assert!(nrg_f > 0.0);
         debug_assert!(nrg_b > 0.0);
@@ -107,26 +108,26 @@ pub fn silk_burg_modified_FLP(
 
         /* Update the AR coefficients */
         for k in 0..(n + 1) >> 1 {
-            let tmp1 = Af[k];
-            let tmp2 = Af[n - k - 1];
-            Af[k] = tmp1 + rc * tmp2;
-            Af[n - k - 1] = tmp2 + rc * tmp1;
+            let tmp1 = Af.at(k);
+            let tmp2 = Af.at(n - k - 1);
+            *Af.at_mut(k) = tmp1 + rc * tmp2;
+            *Af.at_mut(n - k - 1) = tmp2 + rc * tmp1;
         }
-        Af[n] = rc;
+        *Af.at_mut(n) = rc;
 
         if reached_max_gain {
             /* Reached max prediction gain; set remaining coefficients to zero and exit loop */
             for k in n + 1..d {
-                Af[k] = 0.0;
+                *Af.at_mut(k) = 0.0;
             }
             break;
         }
 
         /* Update C * Af and C * Ab */
         for k in 0..=n + 1 {
-            let tmp1 = CAf[k];
-            CAf[k] += rc * CAb[n + 1 - k];
-            CAb[n + 1 - k] += rc * tmp1;
+            let tmp1 = CAf.at(k);
+            *CAf.at_mut(k) += rc * CAb.at(n + 1 - k);
+            *CAb.at_mut(n + 1 - k) += rc * tmp1;
         }
     }
 
@@ -134,11 +135,11 @@ pub fn silk_burg_modified_FLP(
     if reached_max_gain {
         /* Convert to silk_float */
         for k in 0..d {
-            A[k] = (-Af[k]) as f32;
+            *A.at_mut(k) = (-Af.at(k)) as f32;
         }
         /* Subtract energy of preceding samples from C0 */
         for s in 0..nsf {
-            C0 -= silk_energy_FLP(&x[s * sl..], D);
+            C0 -= silk_energy_FLP(x.rg(s * sl..), D);
         }
         /* Approximate residual energy */
         nrg_f = C0 * invGain;
@@ -147,10 +148,10 @@ pub fn silk_burg_modified_FLP(
         let mut nrg = CAf[0];
         let mut tmp1 = 1.0f64;
         for k in 0..d {
-            let Atmp = Af[k];
-            nrg += CAf[k + 1] * Atmp;
+            let Atmp = Af.at(k);
+            nrg += CAf.at(k + 1) * Atmp;
             tmp1 += Atmp * Atmp;
-            A[k] = (-Atmp) as f32;
+            *A.at_mut(k) = (-Atmp) as f32;
         }
         nrg -= cond_fac * C0 * tmp1;
         nrg_f = nrg;

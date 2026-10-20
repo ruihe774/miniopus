@@ -50,9 +50,9 @@ pub fn silk_NLSF_del_dec_quant(
             out0_Q10 = out0_Q10.wrapping_add(adj as i16);
             out1_Q10 = out1_Q10.wrapping_add(adj as i16);
         }
-        out0_Q10_table[(i + NLSF_QUANT_MAX_AMPLITUDE_EXT) as usize] =
+        *out0_Q10_table.at_mut((i + NLSF_QUANT_MAX_AMPLITUDE_EXT) as usize) =
             silk_RSHIFT(silk_SMULBB(out0_Q10 as i32, quant_step_size_Q16), 16);
-        out1_Q10_table[(i + NLSF_QUANT_MAX_AMPLITUDE_EXT) as usize] =
+        *out1_Q10_table.at_mut((i + NLSF_QUANT_MAX_AMPLITUDE_EXT) as usize) =
             silk_RSHIFT(silk_SMULBB(out1_Q10 as i32, quant_step_size_Q16), 16);
     }
 
@@ -62,30 +62,30 @@ pub fn silk_NLSF_del_dec_quant(
     RD_Q25[0] = 0;
     prev_out_Q10[0] = 0;
     for i in (0..order as usize).rev() {
-        let rates_Q5 = &ec_rates_Q5[ec_ix[i] as usize..];
-        let in_Q10 = x_Q10[i] as i32;
+        let rates_Q5 = ec_rates_Q5.rg(ec_ix.at(i) as usize..);
+        let in_Q10 = x_Q10.at(i) as i32;
         for j in 0..nStates {
-            let pred_Q10 = silk_RSHIFT(silk_SMULBB(pred_coef_Q8[i] as i32, prev_out_Q10[j] as i32), 8);
+            let pred_Q10 = silk_RSHIFT(silk_SMULBB(pred_coef_Q8.at(i) as i32, prev_out_Q10.at(j) as i32), 8);
             let res_Q10 = (in_Q10 - pred_Q10) as i16 as i32; /* silk_SUB16 */
             let mut ind_tmp = silk_RSHIFT(silk_SMULBB(inv_quant_step_size_Q6 as i32, res_Q10), 16);
             ind_tmp = silk_LIMIT!(ind_tmp, -NLSF_QUANT_MAX_AMPLITUDE_EXT, NLSF_QUANT_MAX_AMPLITUDE_EXT - 1);
-            ind[j][i] = ind_tmp as i8;
+            *ind[j].at_mut(i) = ind_tmp as i8;
 
             /* compute outputs for ind_tmp and ind_tmp + 1 */
-            let mut out0_Q10 = out0_Q10_table[(ind_tmp + NLSF_QUANT_MAX_AMPLITUDE_EXT) as usize] as i16;
-            let mut out1_Q10 = out1_Q10_table[(ind_tmp + NLSF_QUANT_MAX_AMPLITUDE_EXT) as usize] as i16;
+            let mut out0_Q10 = out0_Q10_table.at((ind_tmp + NLSF_QUANT_MAX_AMPLITUDE_EXT) as usize) as i16;
+            let mut out1_Q10 = out1_Q10_table.at((ind_tmp + NLSF_QUANT_MAX_AMPLITUDE_EXT) as usize) as i16;
 
             out0_Q10 = out0_Q10.wrapping_add(pred_Q10 as i16);
             out1_Q10 = out1_Q10.wrapping_add(pred_Q10 as i16);
-            prev_out_Q10[j] = out0_Q10;
-            prev_out_Q10[j + nStates] = out1_Q10;
+            *prev_out_Q10.at_mut(j) = out0_Q10;
+            *prev_out_Q10.at_mut(j + nStates) = out1_Q10;
 
             /* compute RD for ind_tmp and ind_tmp + 1 */
             let rate0_Q5: i32;
             let rate1_Q5: i32;
             if ind_tmp + 1 >= NLSF_QUANT_MAX_AMPLITUDE {
                 if ind_tmp + 1 == NLSF_QUANT_MAX_AMPLITUDE {
-                    rate0_Q5 = rates_Q5[(ind_tmp + NLSF_QUANT_MAX_AMPLITUDE) as usize] as i32;
+                    rate0_Q5 = rates_Q5.at((ind_tmp + NLSF_QUANT_MAX_AMPLITUDE) as usize) as i32;
                     rate1_Q5 = 280;
                 } else {
                     rate0_Q5 = silk_SMLABB(280 - 43 * NLSF_QUANT_MAX_AMPLITUDE, 43, ind_tmp);
@@ -94,25 +94,25 @@ pub fn silk_NLSF_del_dec_quant(
             } else if ind_tmp <= -NLSF_QUANT_MAX_AMPLITUDE {
                 if ind_tmp == -NLSF_QUANT_MAX_AMPLITUDE {
                     rate0_Q5 = 280;
-                    rate1_Q5 = rates_Q5[(ind_tmp + 1 + NLSF_QUANT_MAX_AMPLITUDE) as usize] as i32;
+                    rate1_Q5 = rates_Q5.at((ind_tmp + 1 + NLSF_QUANT_MAX_AMPLITUDE) as usize) as i32;
                 } else {
                     rate0_Q5 = silk_SMLABB(280 - 43 * NLSF_QUANT_MAX_AMPLITUDE, -43, ind_tmp);
                     rate1_Q5 = (rate0_Q5 - 43) as i16 as i32; /* silk_SUB16 */
                 }
             } else {
-                rate0_Q5 = rates_Q5[(ind_tmp + NLSF_QUANT_MAX_AMPLITUDE) as usize] as i32;
-                rate1_Q5 = rates_Q5[(ind_tmp + 1 + NLSF_QUANT_MAX_AMPLITUDE) as usize] as i32;
+                rate0_Q5 = rates_Q5.at((ind_tmp + NLSF_QUANT_MAX_AMPLITUDE) as usize) as i32;
+                rate1_Q5 = rates_Q5.at((ind_tmp + 1 + NLSF_QUANT_MAX_AMPLITUDE) as usize) as i32;
             }
-            let RD_tmp_Q25 = RD_Q25[j];
+            let RD_tmp_Q25 = RD_Q25.at(j);
             let mut diff_Q10 = (in_Q10 - out0_Q10 as i32) as i16 as i32; /* silk_SUB16 */
-            RD_Q25[j] = silk_SMLABB(
-                silk_MLA(RD_tmp_Q25, silk_SMULBB(diff_Q10, diff_Q10), w_Q5[i] as i32),
+            *RD_Q25.at_mut(j) = silk_SMLABB(
+                silk_MLA(RD_tmp_Q25, silk_SMULBB(diff_Q10, diff_Q10), w_Q5.at(i) as i32),
                 mu_Q20,
                 rate0_Q5,
             );
             diff_Q10 = (in_Q10 - out1_Q10 as i32) as i16 as i32; /* silk_SUB16 */
-            RD_Q25[j + nStates] = silk_SMLABB(
-                silk_MLA(RD_tmp_Q25, silk_SMULBB(diff_Q10, diff_Q10), w_Q5[i] as i32),
+            *RD_Q25.at_mut(j + nStates) = silk_SMLABB(
+                silk_MLA(RD_tmp_Q25, silk_SMULBB(diff_Q10, diff_Q10), w_Q5.at(i) as i32),
                 mu_Q20,
                 rate1_Q5,
             );
@@ -121,11 +121,11 @@ pub fn silk_NLSF_del_dec_quant(
         if nStates <= NSTATES / 2 {
             /* double number of states and copy */
             for j in 0..nStates {
-                ind[j + nStates][i] = ind[j][i] + 1;
+                *ind[j + nStates].at_mut(i) = ind[j].at(i) + 1;
             }
             nStates <<= 1;
             for j in nStates..NSTATES {
-                ind[j][i] = ind[j - nStates][i];
+                *ind[j].at_mut(i) = ind[j - nStates].at(i);
             }
         } else {
             /* sort lower and upper half of RD_Q25, pairwise */
@@ -176,7 +176,7 @@ pub fn silk_NLSF_del_dec_quant(
             }
             /* increment index if it comes from the upper half */
             for j in 0..NSTATES {
-                ind[j][i] += silk_RSHIFT(ind_sort[j], NLSF_QUANT_DEL_DEC_STATES_LOG2) as i8;
+                *ind[j].at_mut(i) += silk_RSHIFT(ind_sort[j], NLSF_QUANT_DEL_DEC_STATES_LOG2) as i8;
             }
         }
     }
@@ -191,11 +191,11 @@ pub fn silk_NLSF_del_dec_quant(
         }
     }
     for j in 0..order as usize {
-        indices[j] = ind[ind_tmp & (NSTATES - 1)][j];
+        *indices.at_mut(j) = ind[ind_tmp & (NSTATES - 1)].at(j);
         debug_assert!(indices[j] as i32 >= -NLSF_QUANT_MAX_AMPLITUDE_EXT);
         debug_assert!(indices[j] as i32 <= NLSF_QUANT_MAX_AMPLITUDE_EXT);
     }
-    indices[0] += silk_RSHIFT(ind_tmp as i32, NLSF_QUANT_DEL_DEC_STATES_LOG2) as i8;
+    *indices.at_mut(0) += silk_RSHIFT(ind_tmp as i32, NLSF_QUANT_DEL_DEC_STATES_LOG2) as i8;
     debug_assert!(indices[0] as i32 <= NLSF_QUANT_MAX_AMPLITUDE_EXT);
     debug_assert!(min_Q25 >= 0);
     min_Q25
