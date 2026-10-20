@@ -79,15 +79,15 @@ unsafe fn silk_nsq_scale_states_wasm(
         let mut i: i32;
         let mut g: v128;
 
-        let lag = pitchL[subfr];
-        let mut inv_gain_Q31 = silk_INVERSE32_varQ(silk_max!(Gains_Q16[subfr], 1), 47);
+        let lag = pitchL.at(subfr);
+        let mut inv_gain_Q31 = silk_INVERSE32_varQ(silk_max!(Gains_Q16.at(subfr), 1), 47);
         debug_assert!(inv_gain_Q31 != 0);
 
         /* Scale input */
         let inv_gain_Q26 = silk_RSHIFT_ROUND(inv_gain_Q31, 5);
         g = i32x4_splat(inv_gain_Q26);
-        let x16p = x16[..subfr_length as usize].as_ptr();
-        let x_sc = x_sc_Q10[..subfr_length as usize].as_mut_ptr();
+        let x16p = x16.rg(..subfr_length as usize).as_ptr();
+        let x_sc = x_sc_Q10.rg_mut(..subfr_length as usize).as_mut_ptr();
         i = 0;
         while i < subfr_length - 3 {
             st(x_sc.add(i as usize), silk_SMULWW_wasm(i32x4_load_extend_i16x4(x16p.add(i as usize)), g));
@@ -123,8 +123,8 @@ unsafe fn silk_nsq_scale_states_wasm(
         }
 
         /* Adjust for changing gain */
-        if Gains_Q16[subfr] != NSQ.prev_gain_Q16 {
-            let gain_adj_Q16 = silk_DIV32_varQ(NSQ.prev_gain_Q16, Gains_Q16[subfr], 16);
+        if Gains_Q16.at(subfr) != NSQ.prev_gain_Q16 {
+            let gain_adj_Q16 = silk_DIV32_varQ(NSQ.prev_gain_Q16, Gains_Q16.at(subfr), 16);
             g = i32x4_splat(gain_adj_Q16);
 
             /* Scale long-term shaping state */
@@ -168,7 +168,7 @@ unsafe fn silk_nsq_scale_states_wasm(
             }
 
             /* Save inverse gain */
-            NSQ.prev_gain_Q16 = Gains_Q16[subfr];
+            NSQ.prev_gain_Q16 = Gains_Q16.at(subfr);
         }
     }
 }
@@ -254,9 +254,9 @@ unsafe fn silk_noise_shape_quantizer_wasm<const AR_VECS: usize>(
 
         /* Short-term prediction: lpc0..lpc3 = psLPC_Q14[ -16 .. -1 ] against a_Q12[ 16 .. 1 ],
            with zeros above predictLPCOrder; psLPC_Q14[ 0 ] is xq_prev_Q14 */
-        coef[0] = 0;
+        *coef.at_mut(0) = 0;
         for i in 1..MAX_LPC_ORDER_ {
-            coef[MAX_LPC_ORDER_ - i] = if (i as i32) < predictLPCOrder { a_Q12[i] as i32 } else { 0 };
+            *coef.at_mut(MAX_LPC_ORDER_ - i) = if (i as i32) < predictLPCOrder { a_Q12.at(i) as i32 } else { 0 };
         }
         let a0 = ld(coef.as_ptr().add(0));
         let a1 = ld(coef.as_ptr().add(4));
@@ -275,7 +275,7 @@ unsafe fn silk_noise_shape_quantizer_wasm<const AR_VECS: usize>(
         /* Noise shape feedback: the filter input is { sDiff_shp_Q14, sAR2_Q14[ 0 ], sAR2_Q14[ 1 ], ... }.
            ar0..ar5 hold sAR2_Q14[], against AR_shp_Q13[ 1 .. ] with zeros from shapingLPCOrder on. */
         for i in 0..4 * AR_VECS {
-            coef[i] = if (i as i32) + 1 < shapingLPCOrder { AR_shp_Q13[i + 1] as i32 } else { 0 };
+            *coef.at_mut(i) = if (i as i32) + 1 < shapingLPCOrder { AR_shp_Q13.at(i + 1) as i32 } else { 0 };
         }
         let c0 = ld(coef.as_ptr().add(0));
         let c1 = ld(coef.as_ptr().add(4));
@@ -299,7 +299,7 @@ unsafe fn silk_noise_shape_quantizer_wasm<const AR_VECS: usize>(
         }
 
         /* Long-term prediction: taps 1..4 in a vector, against pred_lag_ptr[ -4 .. -1 ] */
-        let b_sx = i32x4(b_Q14[4] as i32, b_Q14[3] as i32, b_Q14[2] as i32, b_Q14[1] as i32);
+        let b_sx = i32x4(b_Q14.at(4) as i32, b_Q14.at(3) as i32, b_Q14.at(2) as i32, b_Q14.at(1) as i32);
 
         sDiff_shp_Q14 = NSQ.sDiff_shp_Q14;
         sLF_AR_shp_Q14 = NSQ.sLF_AR_shp_Q14;
@@ -342,16 +342,16 @@ unsafe fn silk_noise_shape_quantizer_wasm<const AR_VECS: usize>(
 
             /* Avoids introducing a bias because silk_SMLAWB() always rounds to -inf */
             LPC_pred_Q10 = silk_ADD32_ovflw(silk_RSHIFT(predictLPCOrder, 1), i32x4_extract_lane::<0>(t0));
-            LPC_pred_Q10 = silk_SMLAWB(LPC_pred_Q10, xq_prev_Q14, a_Q12[0] as i32);
+            LPC_pred_Q10 = silk_SMLAWB(LPC_pred_Q10, xq_prev_Q14, a_Q12.at(0) as i32);
             if signalType == TYPE_VOICED {
                 LTP_pred_Q13 = silk_ADD32_ovflw(2, i32x4_extract_lane::<2>(t0));
-                LTP_pred_Q13 = silk_SMLAWB(LTP_pred_Q13, *pred_lag_ptr, b_Q14[0] as i32);
+                LTP_pred_Q13 = silk_SMLAWB(LTP_pred_Q13, *pred_lag_ptr, b_Q14.at(0) as i32);
                 pred_lag_ptr = pred_lag_ptr.add(1);
             } else {
                 LTP_pred_Q13 = 0;
             }
             n_AR_Q12 = silk_ADD32_ovflw(silk_RSHIFT(shapingLPCOrder, 1), i32x4_extract_lane::<1>(t0));
-            n_AR_Q12 = silk_SMLAWB(n_AR_Q12, sDiff_shp_Q14, AR_shp_Q13[0] as i32);
+            n_AR_Q12 = silk_SMLAWB(n_AR_Q12, sDiff_shp_Q14, AR_shp_Q13.at(0) as i32);
             /* Q11 -> Q12 */
             n_AR_Q12 = silk_LSHIFT32(n_AR_Q12, 1);
 
@@ -379,7 +379,7 @@ unsafe fn silk_noise_shape_quantizer_wasm<const AR_VECS: usize>(
                 tmp1 = silk_RSHIFT_ROUND(tmp1, 2); /* Q10 */
             }
 
-            r_Q10 = silk_SUB32(x_sc_Q10[i], tmp1); /* residual error Q10 */
+            r_Q10 = silk_SUB32(x_sc_Q10.at(i), tmp1); /* residual error Q10 */
 
             /* Flip sign depending on dither */
             if NSQ.rand_seed < 0 {
@@ -465,7 +465,7 @@ unsafe fn silk_noise_shape_quantizer_wasm<const AR_VECS: usize>(
             ar2 = i32x4_shuffle::<3, 4, 5, 6>(ar1, ar2);
             ar1 = i32x4_shuffle::<3, 4, 5, 6>(ar0, ar1);
             ar0 = i32x4_shuffle::<3, 4, 5, 6>(i32x4_splat(sDiff_shp_Q14), ar0);
-            sDiff_shp_Q14 = silk_SUB32_ovflw(xq_Q14, silk_LSHIFT32(x_sc_Q10[i], 4));
+            sDiff_shp_Q14 = silk_SUB32_ovflw(xq_Q14, silk_LSHIFT32(x_sc_Q10.at(i), 4));
             sLF_AR_shp_Q14 = silk_SUB32_ovflw(sDiff_shp_Q14, silk_LSHIFT32(n_AR_Q12, 2));
 
             *sLTP_shp.add(NSQ.sLTP_shp_buf_idx as usize) =
@@ -565,7 +565,7 @@ pub unsafe fn silk_NSQ(
 
         debug_assert!(NSQ.prev_gain_Q16 != 0);
 
-        let offset_Q10 = silk_Quantization_Offsets_Q10[(signalType >> 1) as usize][quantOffsetType as usize] as i32;
+        let offset_Q10 = silk_Quantization_Offsets_Q10.at((signalType >> 1) as usize).at(quantOffsetType as usize) as i32;
 
         let LSF_interpolation_flag = if NLSFInterpCoef_Q2 == 4 { 0 } else { 1 };
 
@@ -580,19 +580,19 @@ pub unsafe fn silk_NSQ(
         let mut x16_off = 0usize;
         let mut pulses = pulses;
         for k in 0..nb_subfr as usize {
-            let A_Q12 = &PredCoef_Q12[(((k >> 1) | (1 - LSF_interpolation_flag)) * MAX_LPC_ORDER_)..][..MAX_LPC_ORDER_];
-            let B_Q14 = &LTPCoef_Q14[k * LTP_ORDER_..][..LTP_ORDER_];
-            let AR_shp_Q13 = &AR_Q13[k * MAX_SHAPE_LPC_ORDER_..][..MAX_SHAPE_LPC_ORDER_];
+            let A_Q12 = PredCoef_Q12.rg((((k >> 1) | (1 - LSF_interpolation_flag)) * MAX_LPC_ORDER_)..).rg(..MAX_LPC_ORDER_);
+            let B_Q14 = LTPCoef_Q14.rg(k * LTP_ORDER_..).rg(..LTP_ORDER_);
+            let AR_shp_Q13 = AR_Q13.rg(k * MAX_SHAPE_LPC_ORDER_..).rg(..MAX_SHAPE_LPC_ORDER_);
 
             /* Noise shape parameters */
-            debug_assert!(HarmShapeGain_Q14[k] >= 0);
-            let mut HarmShapeFIRPacked_Q14 = silk_RSHIFT(HarmShapeGain_Q14[k], 2);
-            HarmShapeFIRPacked_Q14 |= silk_LSHIFT(silk_RSHIFT(HarmShapeGain_Q14[k], 1), 16);
+            debug_assert!(HarmShapeGain_Q14.at(k) >= 0);
+            let mut HarmShapeFIRPacked_Q14 = silk_RSHIFT(HarmShapeGain_Q14.at(k), 2);
+            HarmShapeFIRPacked_Q14 |= silk_LSHIFT(silk_RSHIFT(HarmShapeGain_Q14.at(k), 1), 16);
 
             NSQ.rewhite_flag = 0;
             if signalType == TYPE_VOICED {
                 /* Voiced */
-                lag = pitchL[k];
+                lag = pitchL.at(k);
 
                 /* Re-whitening */
                 if (k as i32 & (3 - silk_LSHIFT(LSF_interpolation_flag as i32, 1))) == 0 {
@@ -601,8 +601,8 @@ pub unsafe fn silk_NSQ(
                     debug_assert!(start_idx > 0);
 
                     silk_LPC_analysis_filter(
-                        &mut sLTP[start_idx as usize..],
-                        &NSQ.xq[(start_idx + k as i32 * subfr_length) as usize..],
+                        sLTP.rg_mut(start_idx as usize..),
+                        NSQ.xq.rg((start_idx + k as i32 * subfr_length) as usize..),
                         A_Q12,
                         ltp_mem_length - start_idx,
                         predictLPCOrder,
@@ -617,7 +617,7 @@ pub unsafe fn silk_NSQ(
                 subfr_length,
                 ltp_mem_length,
                 NSQ,
-                &x16[x16_off..],
+                x16.rg(x16_off..),
                 x_sc_Q10,
                 sLTP,
                 sLTP_Q15,
@@ -631,13 +631,13 @@ pub unsafe fn silk_NSQ(
             if shapingLPCOrder <= 16 {
                 silk_noise_shape_quantizer_wasm::<4>(
                     NSQ, signalType, x_sc_Q10, pulses, pxq, sLTP_Q15, A_Q12, B_Q14, AR_shp_Q13, lag,
-                    HarmShapeFIRPacked_Q14, Tilt_Q14[k], LF_shp_Q14[k], Gains_Q16[k], Lambda_Q10, offset_Q10,
+                    HarmShapeFIRPacked_Q14, Tilt_Q14.at(k), LF_shp_Q14.at(k), Gains_Q16.at(k), Lambda_Q10, offset_Q10,
                     subfr_length, shapingLPCOrder, predictLPCOrder,
                 );
             } else {
                 silk_noise_shape_quantizer_wasm::<6>(
                     NSQ, signalType, x_sc_Q10, pulses, pxq, sLTP_Q15, A_Q12, B_Q14, AR_shp_Q13, lag,
-                    HarmShapeFIRPacked_Q14, Tilt_Q14[k], LF_shp_Q14[k], Gains_Q16[k], Lambda_Q10, offset_Q10,
+                    HarmShapeFIRPacked_Q14, Tilt_Q14.at(k), LF_shp_Q14.at(k), Gains_Q16.at(k), Lambda_Q10, offset_Q10,
                     subfr_length, shapingLPCOrder, predictLPCOrder,
                 );
             }
@@ -648,7 +648,7 @@ pub unsafe fn silk_NSQ(
         }
 
         /* Update lagPrev for next frame */
-        NSQ.lagPrev = pitchL[nb_subfr as usize - 1];
+        NSQ.lagPrev = pitchL.at(nb_subfr as usize - 1);
 
         /* Save quantized speech and noise shaping signals */
         NSQ.xq.copy_within(frame_length as usize..(frame_length + ltp_mem_length) as usize, 0);

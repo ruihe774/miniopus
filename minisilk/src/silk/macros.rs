@@ -14,6 +14,52 @@
 //!   `macro_rules!` macros; everything else is an `#[inline(always)]` function.
 
 
+/* Indexing (no C counterpart; lives here because every SILK module already imports `macros::*`) */
+
+/// Indexing and range slicing as in C: no bounds check (`at`/`at_mut` replace `x[i]`,
+/// `rg`/`rg_mut` replace `x[a..b]`, `&x[a..]`, ...). With debug assertions on (the `checked`
+/// profile that the tests run) they are the ordinary bounds-checked operations, so an index that
+/// is out of range traps there. The callers' indices are in range by construction, as in the C
+/// code; the release build thereby drops the panic sites and their source locations.
+/// (Same trait as minicelt's `arch::Ix`; minisilk has no `arch` module.)
+pub trait Ix<T: Copy> {
+    fn at(&self, i: usize) -> T;
+    fn at_mut(&mut self, i: usize) -> &mut T;
+    fn rg<R: core::slice::SliceIndex<[T], Output = [T]>>(&self, r: R) -> &[T];
+    fn rg_mut<R: core::slice::SliceIndex<[T], Output = [T]>>(&mut self, r: R) -> &mut [T];
+}
+
+impl<T: Copy> Ix<T> for [T] {
+    #[inline(always)]
+    fn at(&self, i: usize) -> T {
+        if cfg!(debug_assertions) {
+            self[i]
+        } else {
+            // SAFETY: see the trait documentation.
+            unsafe { *self.get_unchecked(i) }
+        }
+    }
+    #[inline(always)]
+    fn rg<R: core::slice::SliceIndex<[T], Output = [T]>>(&self, r: R) -> &[T] {
+        // SAFETY: see the trait documentation.
+        if cfg!(debug_assertions) { &self[r] } else { unsafe { self.get_unchecked(r) } }
+    }
+    #[inline(always)]
+    fn rg_mut<R: core::slice::SliceIndex<[T], Output = [T]>>(&mut self, r: R) -> &mut [T] {
+        // SAFETY: see the trait documentation.
+        if cfg!(debug_assertions) { &mut self[r] } else { unsafe { self.get_unchecked_mut(r) } }
+    }
+    #[inline(always)]
+    fn at_mut(&mut self, i: usize) -> &mut T {
+        if cfg!(debug_assertions) {
+            &mut self[i]
+        } else {
+            // SAFETY: see the trait documentation.
+            unsafe { self.get_unchecked_mut(i) }
+        }
+    }
+}
+
 pub const silk_int32_MAX: i32 = i32::MAX;
 pub const silk_int32_MIN: i32 = i32::MIN;
 pub const silk_int16_MAX: i32 = i16::MAX as i32;
