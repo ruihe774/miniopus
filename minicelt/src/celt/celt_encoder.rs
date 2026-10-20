@@ -1090,9 +1090,6 @@ pub fn tone_detect(in_: &[f32], CC: i32, N: i32, toneishness: &mut f32) -> f32 {
 /// signal. The C `prefilter_mem` argument is `st->in_mem + CC*overlap`, which is
 /// `st.prefilter_mem` here (updated in place). Returns `pf_on`.
 /// Dropped parameters: `analysis`, `qext_scale`; `st->arch`.
-// IX-HARD: the `rg` ranges at `c * mp`, `c * ps`, `c * stride + ...`: channel offsets into runtime-sized
-// buffers. The constant indices into the 2-element `before`/`after`/`thresh` arrays are left on `Ix` too;
-// not measured.
 pub fn run_prefilter(
     st: &mut CELTEncoder,
     in_: &mut [f32],
@@ -1121,11 +1118,11 @@ pub fn run_prefilter(
     let pf_on: i32;
     let qg: i32;
 
-    let ps = (N + max_period) as usize;
-    let mp = max_period as usize;
-    let nu = N as usize;
-    let ovu = overlap as usize;
-    let stride = nu + ovu;
+    /* N is 960 (the only frame size); CC is 1 or 2 */
+    const NU: usize = 960;
+    const OVU: usize = modes::overlap as usize;
+    const MP: usize = COMBFILTER_MAXPERIOD as usize;
+    debug_assert!(N as usize == NU && (CC == 1 || CC == 2));
 
     /* If we detect that the signal is dominated by a single tone, don't rely on the standard pitch
     estimator, as it can become unreliable. */
@@ -1161,10 +1158,10 @@ pub fn run_prefilter(
         let mut pi: i32 = 0;
 
         /* the pitch analysis reads the `_pre` of C ([prefilter_mem | new samples] per channel) in place */
-        pitch_downsample_factor2(&st.prefilter_mem, in_, ovu, stride, pitch_buf, (max_period + N) >> 1, CC);
+        pitch_downsample_factor2(&st.prefilter_mem, in_, OVU, NU + OVU, pitch_buf, (max_period + N) >> 1, CC);
         /* Don't search for the fir last 1.5 octave of the range because
         there's too many false-positives due to short-term correlation */
-        pitch_search(pitch_buf.rg((mp >> 1)..), pitch_buf, N, max_period - 3 * min_period, &mut pi);
+        pitch_search(&pitch_buf[MP >> 1..], pitch_buf, N, max_period - 3 * min_period, &mut pi);
         pi = max_period - pi;
 
         gain1 = remove_doubling(pitch_buf, max_period, min_period, N, &mut pi, st.prefilter_period, st.prefilter_gain);
@@ -1233,28 +1230,32 @@ pub fn run_prefilter(
 
     /* _pre: CC*(N+max_period); pre[c] = _pre + c*(N+max_period); allocated after the pitch
     analysis (which does not need it) to keep the pseudostack peak low */
-    let _pre = sg.alloc::<f32>(CC as usize * ps);
+    let _pre = sg.alloc::<f32>(CC as usize * (NU + MP));
 
-    for c in 0..CC as usize {
-        _pre.rg_mut(c * ps..c * ps + mp).copy_from_slice(st.prefilter_mem.rg(c * mp..(c + 1) * mp));
-        _pre.rg_mut(c * ps + mp..c * ps + mp + nu).copy_from_slice(in_.rg(c * stride + ovu..c * stride + ovu + nu));
+    /* Per-channel views of fixed size: in_[c] = [in_mem copy (overlap) | N samples],
+    pre[c] = [prefilter_mem (max_period) | N samples]. */
+    let ccu = if CC == 2 { 2 } else { 1 };
+    let in_c = &mut in_.as_chunks_mut::<{ NU + OVU }>().0[..ccu];
+    let pre_c = &mut _pre.as_chunks_mut::<{ NU + MP }>().0[..ccu];
+    let pm_c = st.prefilter_mem.as_chunks_mut::<MP>().0;
+    let im_c = st.in_mem.as_chunks_mut::<OVU>().0;
+
+    for c in 0..ccu {
+        pre_c[c][..MP].copy_from_slice(&pm_c[c]);
+        pre_c[c][MP..].copy_from_slice(&in_c[c][OVU..]);
     }
 
-    unsafe {
-        let inp = in_.as_mut_ptr();
-        let pre = _pre.as_mut_ptr();
-        for c in 0..CC as usize {
-            /* offset = shortMdctSize - overlap = 0: the first (constant-filter) comb_filter of
-            the C code has length 0 */
-            st.prefilter_period = IMAX(st.prefilter_period, COMBFILTER_MINPERIOD);
-            core::ptr::copy_nonoverlapping(st.in_mem.as_ptr().add(c * ovu), inp.add(c * stride), ovu);
-            for i in 0..nu {
-                *before.at_mut(c) += ABS32(*inp.add(c * stride + ovu + i));
-            }
-
+    /* offset = shortMdctSize - overlap = 0: the first (constant-filter) comb_filter of
+    the C code has length 0 */
+    st.prefilter_period = IMAX(st.prefilter_period, COMBFILTER_MINPERIOD);
+    let abs_sum = |x: &[f32]| x.iter().fold(0.0f32, |s, &v| s + ABS32(v));
+    for c in 0..ccu {
+        in_c[c][..OVU].copy_from_slice(&im_c[c]);
+        before[c] = abs_sum(&in_c[c][OVU..]);
+        unsafe {
             comb_filter(
-                inp.add(c * stride + ovu),
-                pre.add(c * ps + mp),
+                in_c[c].as_mut_ptr().add(OVU),
+                pre_c[c].as_mut_ptr().add(MP),
                 st.prefilter_period,
                 pitch_index,
                 N,
@@ -1263,36 +1264,35 @@ pub fn run_prefilter(
                 st.prefilter_tapset,
                 prefilter_tapset,
             );
-            for i in 0..nu {
-                *after.at_mut(c) += ABS32(*inp.add(c * stride + ovu + i));
-            }
         }
+        after[c] = abs_sum(&in_c[c][OVU..]);
+    }
 
-        if CC == 2 {
-            let mut thresh = [0.0f32; 2];
-            *thresh.at_mut(0) = (0.25f32 * gain1) * before.at(0) + 0.01f32 * before.at(1);
-            *thresh.at_mut(1) = (0.25f32 * gain1) * before.at(1) + 0.01f32 * before.at(0);
-            /* Don't use the filter if one channel gets significantly worse. */
-            if after.at(0) - before.at(0) > thresh.at(0) || after.at(1) - before.at(1) > thresh.at(1) {
-                cancel_pitch = true;
-            }
-            /* Use the filter only if at least one channel gets significantly better. */
-            if before.at(0) - after.at(0) < thresh.at(0) && before.at(1) - after.at(1) < thresh.at(1) {
-                cancel_pitch = true;
-            }
-        } else {
-            /* Check that the mono channel actually got better. */
-            if after.at(0) > before.at(0) {
-                cancel_pitch = true;
-            }
+    if CC == 2 {
+        let thresh0 = (0.25f32 * gain1) * before[0] + 0.01f32 * before[1];
+        let thresh1 = (0.25f32 * gain1) * before[1] + 0.01f32 * before[0];
+        /* Don't use the filter if one channel gets significantly worse. */
+        if after[0] - before[0] > thresh0 || after[1] - before[1] > thresh1 {
+            cancel_pitch = true;
         }
-        /* If needed, revert to a gain of zero. */
-        if cancel_pitch {
-            for c in 0..CC as usize {
-                core::ptr::copy_nonoverlapping(pre.add(c * ps + mp), inp.add(c * stride + ovu), nu);
+        /* Use the filter only if at least one channel gets significantly better. */
+        if before[0] - after[0] < thresh0 && before[1] - after[1] < thresh1 {
+            cancel_pitch = true;
+        }
+    } else {
+        /* Check that the mono channel actually got better. */
+        if after[0] > before[0] {
+            cancel_pitch = true;
+        }
+    }
+    /* If needed, revert to a gain of zero. */
+    if cancel_pitch {
+        for c in 0..ccu {
+            in_c[c][OVU..].copy_from_slice(&pre_c[c][MP..]);
+            unsafe {
                 comb_filter(
-                    inp.add(c * stride + ovu),
-                    pre.add(c * ps + mp),
+                    in_c[c].as_mut_ptr().add(OVU),
+                    pre_c[c].as_mut_ptr().add(MP),
                     st.prefilter_period,
                     pitch_index,
                     overlap,
@@ -1302,20 +1302,16 @@ pub fn run_prefilter(
                     prefilter_tapset,
                 );
             }
-            gain1 = 0.0;
         }
+        gain1 = 0.0;
     }
     let (pf_on, qg) = if cancel_pitch { (0, 0) } else { (pf_on, qg) };
 
-    for c in 0..CC as usize {
-        st.in_mem.rg_mut(c * ovu..(c + 1) * ovu).copy_from_slice(in_.rg(c * stride + nu..c * stride + nu + ovu));
-
-        if N > max_period {
-            st.prefilter_mem.rg_mut(c * mp..(c + 1) * mp).copy_from_slice(_pre.rg(c * ps + nu..c * ps + nu + mp));
-        } else {
-            st.prefilter_mem.copy_within(c * mp + nu..c * mp + mp, c * mp);
-            st.prefilter_mem.rg_mut(c * mp + mp - nu..(c + 1) * mp).copy_from_slice(_pre.rg(c * ps + mp..c * ps + mp + nu));
-        }
+    for c in 0..ccu {
+        im_c[c].copy_from_slice(&in_c[c][NU..]);
+        /* N < max_period: shift the memory and append the N new samples */
+        pm_c[c].copy_within(NU.., 0);
+        pm_c[c][MP - NU..].copy_from_slice(&pre_c[c][MP..]);
     }
 
     *gain = gain1;
