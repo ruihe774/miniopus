@@ -422,7 +422,6 @@ pub struct split_ctx {
 
 /// # Safety
 /// `X` and `Y` must each be valid for `N` floats and not overlap; `ctx.ec` must be valid.
-// IX-HARD: `modes::logN.at(i)`, `i` is the band index from the caller's context.
 unsafe fn compute_theta(
     ctx: &mut band_ctx,
     sctx: &mut split_ctx,
@@ -448,7 +447,7 @@ unsafe fn compute_theta(
     let bandE = ctx.bandE;
 
     /* Decide on the resolution to give to the split parameter theta */
-    let pulse_cap = modes::logN.at(i as usize) as i32 + LM * (1 << BITRES);
+    let pulse_cap = modes::logN[i as usize] as i32 + LM * (1 << BITRES);
     let offset =
         (pulse_cap >> 1) - if stereo != 0 && N == 2 { QTHETA_OFFSET_TWOPHASE } else { QTHETA_OFFSET };
     let mut qn = compute_qn(N, *b, offset, pulse_cap, stereo);
