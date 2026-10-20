@@ -80,30 +80,29 @@ fn compute_bitrev_table(mut Fout: i32, f: &mut [i16], fstride: usize, factors: &
 }
 
 /// Builds the twiddle and bit-reversal tables (call once before encoding).
-// IX-EASY: constant ranges into the fixed `[kiss_twiddle_cpx; 480]` table.
 pub fn init_fft() {
     use super::static_modes_float::{fft_state48000_960_0, fft_state48000_960_3, fft_twiddles48000_960 as octant};
     // SAFETY: nothing reads the tables while they are rebuilt (init only).
     let t = unsafe { &mut *TABLES.0.get() };
     let tw = &mut t.twiddles;
     let cpx = |r: f32, i: f32| kiss_twiddle_cpx { r, i };
-    tw.rg_mut(..61).copy_from_slice(&octant);
+    tw[..61].copy_from_slice(&octant);
     for k in 61..=120 {
-        let o = tw.at(120 - k);
-        *tw.at_mut(k) = cpx(-o.i, -o.r);
+        let o = tw[120 - k];
+        tw[k] = cpx(-o.i, -o.r);
     }
     for k in 121..240 {
-        let o = tw.at(k - 120);
-        *tw.at_mut(k) = cpx(o.i, -o.r);
+        let o = tw[k - 120];
+        tw[k] = cpx(o.i, -o.r);
     }
     for k in 240..480 {
-        let o = tw.at(k - 240);
-        *tw.at_mut(k) = cpx(-o.r, -o.i);
+        let o = tw[k - 240];
+        tw[k] = cpx(-o.r, -o.i);
     }
     /* the axis points of the C table are cos/sin of exact multiples of pi/2 in double */
-    *tw.at_mut(120) = cpx(6.123234e-17, -1.0);
-    *tw.at_mut(240) = cpx(-1.0, -1.2246469e-16);
-    *tw.at_mut(360) = cpx(-1.8369701e-16, 1.0);
+    tw[120] = cpx(6.123234e-17, -1.0);
+    tw[240] = cpx(-1.0, -1.2246469e-16);
+    tw[360] = cpx(-1.8369701e-16, 1.0);
     compute_bitrev_table(0, &mut t.bitrev480, 1, &fft_state48000_960_0.factors);
     compute_bitrev_table(0, &mut t.bitrev60, 1, &fft_state48000_960_3.factors);
 }
@@ -169,26 +168,26 @@ fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
     }
 }
 
-// IX-MIXED: `scratch[0..6]` constants and the `m == 1` branch (`rg_mut(o..o + 4)`) are EASY; `Fout.at(fo + k * m)`
-// and `tw.at(k * fstride)` (offsets from the runtime `m`, `mm`, `fstride`) are HARD.
+// IX-HARD: `Fout.rg_mut(o..o + 4)`, `Fout.at(fo + k * m)` and `tw.at(k * fstride)`: offsets from the runtime
+// `m`, `mm`, `fstride`. (`scratch` and the four `f[..]` of the `m == 1` branch are plain.)
 fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     if m == 1 {
         /* Degenerate case where all the twiddles are 1. */
         let mut o = 0usize;
         for _ in 0..N {
             let f = Fout.rg_mut(o..o + 4);
-            let scratch0 = C_SUB(f.at(0), f.at(2));
-            let f2 = f.at(2);
-            C_ADDTO(f.at_mut(0), f2);
-            let mut scratch1 = C_ADD(f.at(1), f.at(3));
-            *f.at_mut(2) = C_SUB(f.at(0), scratch1);
-            C_ADDTO(f.at_mut(0), scratch1);
-            scratch1 = C_SUB(f.at(1), f.at(3));
+            let scratch0 = C_SUB(f[0], f[2]);
+            let f2 = f[2];
+            C_ADDTO(&mut f[0], f2);
+            let mut scratch1 = C_ADD(f[1], f[3]);
+            f[2] = C_SUB(f[0], scratch1);
+            C_ADDTO(&mut f[0], scratch1);
+            scratch1 = C_SUB(f[1], f[3]);
 
-            f.at_mut(1).r = scratch0.r + scratch1.i;
-            f.at_mut(1).i = scratch0.i - scratch1.r;
-            f.at_mut(3).r = scratch0.r - scratch1.i;
-            f.at_mut(3).i = scratch0.i + scratch1.r;
+            f[1].r = scratch0.r + scratch1.i;
+            f[1].i = scratch0.i - scratch1.r;
+            f[3].r = scratch0.r - scratch1.i;
+            f[3].i = scratch0.i + scratch1.r;
             o += 4;
         }
     } else {
@@ -201,32 +200,32 @@ fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
             let (mut tw1, mut tw2, mut tw3) = (0usize, 0usize, 0usize);
             /* m is guaranteed to be a multiple of 4. */
             for _ in 0..m {
-                *scratch.at_mut(0) = C_MUL(Fout.at(fo + m), tw.at(tw1));
-                *scratch.at_mut(1) = C_MUL(Fout.at(fo + m2), tw.at(tw2));
-                *scratch.at_mut(2) = C_MUL(Fout.at(fo + m3), tw.at(tw3));
+                scratch[0] = C_MUL(Fout.at(fo + m), tw.at(tw1));
+                scratch[1] = C_MUL(Fout.at(fo + m2), tw.at(tw2));
+                scratch[2] = C_MUL(Fout.at(fo + m3), tw.at(tw3));
 
-                *scratch.at_mut(5) = C_SUB(Fout.at(fo), scratch.at(1));
-                C_ADDTO(Fout.at_mut(fo), scratch.at(1));
-                *scratch.at_mut(3) = C_ADD(scratch.at(0), scratch.at(2));
-                *scratch.at_mut(4) = C_SUB(scratch.at(0), scratch.at(2));
-                *Fout.at_mut(fo + m2) = C_SUB(Fout.at(fo), scratch.at(3));
+                scratch[5] = C_SUB(Fout.at(fo), scratch[1]);
+                C_ADDTO(Fout.at_mut(fo), scratch[1]);
+                scratch[3] = C_ADD(scratch[0], scratch[2]);
+                scratch[4] = C_SUB(scratch[0], scratch[2]);
+                *Fout.at_mut(fo + m2) = C_SUB(Fout.at(fo), scratch[3]);
                 tw1 += fstride;
                 tw2 += fstride * 2;
                 tw3 += fstride * 3;
-                C_ADDTO(Fout.at_mut(fo), scratch.at(3));
+                C_ADDTO(Fout.at_mut(fo), scratch[3]);
 
-                Fout.at_mut(fo + m).r = scratch.at(5).r + scratch.at(4).i;
-                Fout.at_mut(fo + m).i = scratch.at(5).i - scratch.at(4).r;
-                Fout.at_mut(fo + m3).r = scratch.at(5).r - scratch.at(4).i;
-                Fout.at_mut(fo + m3).i = scratch.at(5).i + scratch.at(4).r;
+                Fout.at_mut(fo + m).r = scratch[5].r + scratch[4].i;
+                Fout.at_mut(fo + m).i = scratch[5].i - scratch[4].r;
+                Fout.at_mut(fo + m3).r = scratch[5].r - scratch[4].i;
+                Fout.at_mut(fo + m3).i = scratch[5].i + scratch[4].r;
                 fo += 1;
             }
         }
     }
 }
 
-// IX-MIXED: `scratch[0..4]` constants are EASY; `Fout.at(fo + k * m)` and `tw.at(..)` (offsets from the
-// runtime `m`, `mm`, `fstride`) are HARD.
+// IX-HARD: `Fout.at(fo + k * m)` and `tw.at(..)`: offsets from the runtime `m`, `mm`, `fstride`.
+// (`scratch` is plain.)
 fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let m2 = 2 * m;
@@ -238,28 +237,28 @@ fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
         /* For non-custom modes, m is guaranteed to be a multiple of 4. */
         let mut k = m;
         loop {
-            *scratch.at_mut(1) = C_MUL(Fout.at(fo + m), tw.at(tw1));
-            *scratch.at_mut(2) = C_MUL(Fout.at(fo + m2), tw.at(tw2));
+            scratch[1] = C_MUL(Fout.at(fo + m), tw.at(tw1));
+            scratch[2] = C_MUL(Fout.at(fo + m2), tw.at(tw2));
 
-            *scratch.at_mut(3) = C_ADD(scratch.at(1), scratch.at(2));
-            *scratch.at_mut(0) = C_SUB(scratch.at(1), scratch.at(2));
+            scratch[3] = C_ADD(scratch[1], scratch[2]);
+            scratch[0] = C_SUB(scratch[1], scratch[2]);
             tw1 += fstride;
             tw2 += fstride * 2;
 
-            Fout.at_mut(fo + m).r = Fout.at(fo).r - HALF_OF(scratch.at(3).r);
-            Fout.at_mut(fo + m).i = Fout.at(fo).i - HALF_OF(scratch.at(3).i);
+            Fout.at_mut(fo + m).r = Fout.at(fo).r - HALF_OF(scratch[3].r);
+            Fout.at_mut(fo + m).i = Fout.at(fo).i - HALF_OF(scratch[3].i);
 
             /* C_MULBYSCALAR( scratch[0] , epi3.i ) */
-            scratch.at_mut(0).r *= epi3.i;
-            scratch.at_mut(0).i *= epi3.i;
+            scratch[0].r *= epi3.i;
+            scratch[0].i *= epi3.i;
 
-            C_ADDTO(Fout.at_mut(fo), scratch.at(3));
+            C_ADDTO(Fout.at_mut(fo), scratch[3]);
 
-            Fout.at_mut(fo + m2).r = Fout.at(fo + m).r + scratch.at(0).i;
-            Fout.at_mut(fo + m2).i = Fout.at(fo + m).i - scratch.at(0).r;
+            Fout.at_mut(fo + m2).r = Fout.at(fo + m).r + scratch[0].i;
+            Fout.at_mut(fo + m2).i = Fout.at(fo + m).i - scratch[0].r;
 
-            Fout.at_mut(fo + m).r = Fout.at(fo + m).r - scratch.at(0).i;
-            Fout.at_mut(fo + m).i = Fout.at(fo + m).i + scratch.at(0).r;
+            Fout.at_mut(fo + m).r = Fout.at(fo + m).r - scratch[0].i;
+            Fout.at_mut(fo + m).i = Fout.at(fo + m).i + scratch[0].r;
 
             fo += 1;
             k -= 1;
@@ -270,8 +269,8 @@ fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
     }
 }
 
-// IX-MIXED: `scratch[0..13]` constants are EASY; `Fout.at(f1..f4 + u)` and `tw.at(k * u * fstride)` (offsets
-// from the runtime `m`, `mm`, `fstride`) are HARD.
+// IX-HARD: `Fout.at(f1..f4 + u)` and `tw.at(k * u * fstride)`: offsets from the runtime `m`, `mm`, `fstride`.
+// (`scratch` is plain.)
 fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let mut scratch = [kiss_fft_cpx::default(); 13];
@@ -287,37 +286,37 @@ fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 
         /* For non-custom modes, m is guaranteed to be a multiple of 4. */
         for u in 0..m {
-            *scratch.at_mut(0) = Fout.at(f0 + u);
+            scratch[0] = Fout.at(f0 + u);
 
-            *scratch.at_mut(1) = C_MUL(Fout.at(f1 + u), tw.at(u * fstride));
-            *scratch.at_mut(2) = C_MUL(Fout.at(f2 + u), tw.at(2 * u * fstride));
-            *scratch.at_mut(3) = C_MUL(Fout.at(f3 + u), tw.at(3 * u * fstride));
-            *scratch.at_mut(4) = C_MUL(Fout.at(f4 + u), tw.at(4 * u * fstride));
+            scratch[1] = C_MUL(Fout.at(f1 + u), tw.at(u * fstride));
+            scratch[2] = C_MUL(Fout.at(f2 + u), tw.at(2 * u * fstride));
+            scratch[3] = C_MUL(Fout.at(f3 + u), tw.at(3 * u * fstride));
+            scratch[4] = C_MUL(Fout.at(f4 + u), tw.at(4 * u * fstride));
 
-            *scratch.at_mut(7) = C_ADD(scratch.at(1), scratch.at(4));
-            *scratch.at_mut(10) = C_SUB(scratch.at(1), scratch.at(4));
-            *scratch.at_mut(8) = C_ADD(scratch.at(2), scratch.at(3));
-            *scratch.at_mut(9) = C_SUB(scratch.at(2), scratch.at(3));
+            scratch[7] = C_ADD(scratch[1], scratch[4]);
+            scratch[10] = C_SUB(scratch[1], scratch[4]);
+            scratch[8] = C_ADD(scratch[2], scratch[3]);
+            scratch[9] = C_SUB(scratch[2], scratch[3]);
 
-            Fout.at_mut(f0 + u).r = Fout.at(f0 + u).r + (scratch.at(7).r + scratch.at(8).r);
-            Fout.at_mut(f0 + u).i = Fout.at(f0 + u).i + (scratch.at(7).i + scratch.at(8).i);
+            Fout.at_mut(f0 + u).r = Fout.at(f0 + u).r + (scratch[7].r + scratch[8].r);
+            Fout.at_mut(f0 + u).i = Fout.at(f0 + u).i + (scratch[7].i + scratch[8].i);
 
-            scratch.at_mut(5).r = scratch.at(0).r + (scratch.at(7).r * ya.r + scratch.at(8).r * yb.r);
-            scratch.at_mut(5).i = scratch.at(0).i + (scratch.at(7).i * ya.r + scratch.at(8).i * yb.r);
+            scratch[5].r = scratch[0].r + (scratch[7].r * ya.r + scratch[8].r * yb.r);
+            scratch[5].i = scratch[0].i + (scratch[7].i * ya.r + scratch[8].i * yb.r);
 
-            scratch.at_mut(6).r = scratch.at(10).i * ya.i + scratch.at(9).i * yb.i;
-            scratch.at_mut(6).i = -(scratch.at(10).r * ya.i + scratch.at(9).r * yb.i);
+            scratch[6].r = scratch[10].i * ya.i + scratch[9].i * yb.i;
+            scratch[6].i = -(scratch[10].r * ya.i + scratch[9].r * yb.i);
 
-            *Fout.at_mut(f1 + u) = C_SUB(scratch.at(5), scratch.at(6));
-            *Fout.at_mut(f4 + u) = C_ADD(scratch.at(5), scratch.at(6));
+            *Fout.at_mut(f1 + u) = C_SUB(scratch[5], scratch[6]);
+            *Fout.at_mut(f4 + u) = C_ADD(scratch[5], scratch[6]);
 
-            scratch.at_mut(11).r = scratch.at(0).r + (scratch.at(7).r * yb.r + scratch.at(8).r * ya.r);
-            scratch.at_mut(11).i = scratch.at(0).i + (scratch.at(7).i * yb.r + scratch.at(8).i * ya.r);
-            scratch.at_mut(12).r = scratch.at(9).i * ya.i - scratch.at(10).i * yb.i;
-            scratch.at_mut(12).i = scratch.at(10).r * yb.i - scratch.at(9).r * ya.i;
+            scratch[11].r = scratch[0].r + (scratch[7].r * yb.r + scratch[8].r * ya.r);
+            scratch[11].i = scratch[0].i + (scratch[7].i * yb.r + scratch[8].i * ya.r);
+            scratch[12].r = scratch[9].i * ya.i - scratch[10].i * yb.i;
+            scratch[12].i = scratch[10].r * yb.i - scratch[9].r * ya.i;
 
-            *Fout.at_mut(f2 + u) = C_ADD(scratch.at(11), scratch.at(12));
-            *Fout.at_mut(f3 + u) = C_SUB(scratch.at(11), scratch.at(12));
+            *Fout.at_mut(f2 + u) = C_ADD(scratch[11], scratch[12]);
+            *Fout.at_mut(f3 + u) = C_SUB(scratch[11], scratch[12]);
         }
     }
 }
