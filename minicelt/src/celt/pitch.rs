@@ -323,31 +323,32 @@ fn celt_fir5(x: &mut [f32], num: &[f32; 5], N: i32) {
 /// (`COMBFILTER_MAXPERIOD` history samples, then `len*factor - COMBFILTER_MAXPERIOD` new ones),
 /// read in place: `hist[c*COMBFILTER_MAXPERIOD + j]` for `j < COMBFILTER_MAXPERIOD`, else
 /// `new[new_off + c*new_stride + j - COMBFILTER_MAXPERIOD]`. `x_lp` receives `len` downsampled,
-/// whitened samples.
-pub fn pitch_downsample(hist: &[f32], new: &[f32], new_off: usize, new_stride: usize, x_lp: &mut [f32], len: i32, C: i32, factor: i32) {
+/// whitened samples. The decimation factor is 2 (the C `factor` argument, fixed for the one caller).
+pub fn pitch_downsample_factor2(hist: &[f32], new: &[f32], new_off: usize, new_stride: usize, x_lp: &mut [f32], len: i32, C: i32) {
     debug_assert!(C == 1 || C == 2);
     const MP: usize = 1024; /* COMBFILTER_MAXPERIOD */
-    // IX-HARD: strided, computed indices (`c * stride + j - MP`) into two buffers: not provable from the
-    // slice lengths, so these stay on `Ix`.
-    let x = |c: usize, j: usize| if j < MP { hist.at(c * MP + j) } else { new.at(new_off + c * new_stride + j - MP) };
     let mut ac = [0.0f32; 5];
     let mut tmp: f32 = 1.0;
     let mut lpc = [0.0f32; 4];
     let mut lpc2 = [0.0f32; 5];
     let c1: f32 = 0.8;
-    let offset = (factor / 2) as usize;
-    let factor = factor as usize;
     let n = len as usize;
-    debug_assert!(x_lp.len() >= n);
-    for i in 1..n {
-        *x_lp.at_mut(i) = 0.25 * x(0, factor * i - offset) + 0.25 * x(0, factor * i + offset) + 0.5 * x(0, factor * i);
-    }
-    *x_lp.at_mut(0) = 0.25 * x(0, offset) + 0.5 * x(0, 0);
-    if C == 2 {
-        for i in 1..n {
-            *x_lp.at_mut(i) += 0.25 * x(1, factor * i - offset) + 0.25 * x(1, factor * i + offset) + 0.5 * x(1, factor * i);
+    let x_lp = &mut x_lp[..n];
+    for c in 0..C as usize {
+        /* x = [hist | new] of channel c, read as the pairs (x[2i], x[2i+1]) with x[2i-1] carried along:
+        x_lp[i] = .25*x[2i-1] + .25*x[2i+1] + .5*x[2i], x_lp[0] = .25*x[1] + .5*x[0];
+        channel 0 sets x_lp, channel 1 adds to it */
+        let (h, _) = hist[c * MP..][..MP].as_chunks::<2>();
+        let (nw, _) = new[new_off + c * new_stride..][..2 * n - MP].as_chunks::<2>();
+        let put = |d: &mut f32, v: f32| if c == 0 { *d = v } else { *d += v };
+        let (d0, rest) = x_lp.split_first_mut().unwrap();
+        let [a, b] = h[0];
+        put(d0, 0.25 * b + 0.5 * a);
+        let mut prev = b;
+        for (d, &[a, b]) in rest.iter_mut().zip(h[1..].iter().chain(nw)) {
+            put(d, 0.25 * prev + 0.25 * b + 0.5 * a);
+            prev = b;
         }
-        *x_lp.at_mut(0) += 0.25 * x(1, offset) + 0.5 * x(1, 0);
     }
     _celt_autocorr(x_lp, &mut ac, 4, len);
 

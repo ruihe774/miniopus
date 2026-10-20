@@ -45,11 +45,8 @@ pub fn init_cwrs() {
                 diag = old;
             }
         }
-        // IX-HARD: `ROW[a] + b` is table-driven (the stored rows overlap), so the compiler can't bound it
-        // from `data.len()`; `Ix` stays for the write.
-        for b in a..=CELT_PVQ_U_LAST[a] as usize {
-            *data.at_mut(CELT_PVQ_U_ROW[a] as usize + b) = row[b];
-        }
+        let (r, last) = (CELT_PVQ_U_ROW[a] as usize, CELT_PVQ_U_LAST[a] as usize);
+        data[r + a..=r + last].copy_from_slice(&row[a..=last]);
     }
 }
 

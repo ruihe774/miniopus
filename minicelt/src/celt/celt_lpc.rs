@@ -38,7 +38,7 @@ pub fn _celt_lpc(_lpc: &mut [f32], ac: &[f32], p: i32) {
 }
 
 /// `x`: in, `[0..n-1]` samples; `ac`: out, `[0..lag]` autocorrelation values (`lag+1` entries).
-/// (The only caller, pitch_downsample, has `overlap == 0`: no windowing copy.)
+/// (The only caller, pitch_downsample_factor2, has `overlap == 0`: no windowing copy.)
 pub fn _celt_autocorr(x: &[f32], ac: &mut [f32], lag: i32, n: i32) {
     let fastN = n - lag;
     debug_assert!(n > 0);

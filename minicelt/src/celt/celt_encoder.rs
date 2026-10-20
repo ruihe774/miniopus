@@ -12,7 +12,7 @@ use super::entenc::{ec_enc_bit_logp, ec_enc_bits, ec_enc_done, ec_enc_icdf, ec_e
 use super::mathops::{PI, celt_exp2_db, celt_log2, celt_maxabs_res, celt_rcp};
 use super::mdct::clt_mdct_forward;
 use super::modes;
-use super::pitch::{celt_inner_prod, pitch_downsample, pitch_search, remove_doubling};
+use super::pitch::{celt_inner_prod, pitch_downsample_factor2, pitch_search, remove_doubling};
 use super::quant_bands::{amp2Log2, eMeans, quant_coarse_energy, quant_energy_finalise, quant_fine_energy};
 use super::rate::clt_compute_allocation;
 use crate::opus::defines::OPUS_INTERNAL_ERROR;
@@ -202,10 +202,7 @@ pub fn transient_analysis(
         let mut mem0: f32 = 0.0;
         let mut mem1: f32 = 0.0;
         /* High-pass filter: (1 - 2*z^-1 + z^-2) / (1 - z^-1 + .5*z^-2) */
-        for i in 0..len as usize {
-            // IX-HARD: `c * len + i` into the interleaved channel buffer: the channel offset is computed, so
-            // this stays on `Ix` (as do most of the per-band and per-channel loops in this file).
-            let x = in_.at(i + (c * len) as usize);
+        for (t, &x) in tmp.iter_mut().zip(&in_[(c * len) as usize..][..len as usize]) {
             let y = mem0 + x;
             /* Original code:
             mem0 = mem1 + y - 2*x;
@@ -214,7 +211,7 @@ pub fn transient_analysis(
             let mem00 = mem0;
             mem0 = mem0 - x + 0.5 * mem1;
             mem1 = x - mem00;
-            *tmp.at_mut(i) = y;
+            *t = y;
         }
         /* First few samples are bad because we don't propagate the memory */
         tmp.rg_mut(..12).fill(0.0);
@@ -223,11 +220,13 @@ pub fn transient_analysis(
         mem0 = 0.0;
         /* Grouping by two to reduce complexity */
         /* Forward pass to compute the post-echo threshold*/
-        for i in 0..len2 as usize {
-            let x2 = tmp.at(2 * i) * tmp.at(2 * i) + tmp.at(2 * i + 1) * tmp.at(2 * i + 1);
+        /* in place: pair i is read before tmp[i] (i <= 2i) is written, hence the cells */
+        let cells = core::cell::Cell::from_mut(&mut tmp[..]).as_slice_of_cells();
+        for (t, [a, b]) in cells.iter().zip(cells.as_chunks::<2>().0) {
+            let x2 = a.get() * a.get() + b.get() * b.get();
             mean += x2;
             mem0 = x2 + (1.0 - forward_decay) * mem0;
-            *tmp.at_mut(i) = forward_decay * mem0;
+            t.set(forward_decay * mem0);
         }
 
         mem0 = 0.0;
@@ -1130,7 +1129,7 @@ pub fn run_prefilter(
         let mut pi: i32 = 0;
 
         /* the pitch analysis reads the `_pre` of C ([prefilter_mem | new samples] per channel) in place */
-        pitch_downsample(&st.prefilter_mem, in_, ovu, stride, pitch_buf, (max_period + N) >> 1, CC, 2);
+        pitch_downsample_factor2(&st.prefilter_mem, in_, ovu, stride, pitch_buf, (max_period + N) >> 1, CC);
         /* Don't search for the fir last 1.5 octave of the range because
         there's too many false-positives due to short-term correlation */
         pitch_search(pitch_buf.rg((mp >> 1)..), pitch_buf, N, max_period - 3 * min_period, &mut pi);

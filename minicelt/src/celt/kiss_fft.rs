@@ -63,22 +63,19 @@ pub fn bitrev(shift: i32) -> &'static [i16] {
     }
 }
 
-/// compute_bitrev_table() of kiss_fft.c (`f` indexed from `fi`).
-fn compute_bitrev_table(Fout: i32, f: &mut [i16], mut fi: usize, fstride: usize, factors: &[i16]) {
-    // IX-HARD: `factors` is a (radix, count) list whose length depends on the mode, and `f`/`fi` advance by
-    // computed strides: nothing here lets the compiler bound the indices, so `Ix` stays.
-    let p = factors.at(0) as i32;
-    let m = factors.at(1) as i32;
-    let mut Fout = Fout;
-    for _ in 0..p {
+/// compute_bitrev_table() of kiss_fft.c (`f` starts at the C `f`).
+fn compute_bitrev_table(mut Fout: i32, f: &mut [i16], fstride: usize, factors: &[i16]) {
+    /* the list always ends with m == 1 before it runs out */
+    let &[p, m, ref rest @ ..] = factors else { return };
+    for k in 0..p as usize {
+        let f = &mut f[k * fstride..];
         if m == 1 {
-            *f.at_mut(fi) = Fout as i16;
+            f[0] = Fout as i16;
             Fout += 1;
         } else {
-            compute_bitrev_table(Fout, f, fi, fstride * p as usize, factors.rg(2..));
-            Fout += m;
+            compute_bitrev_table(Fout, f, fstride * p as usize, rest);
+            Fout += m as i32;
         }
-        fi += fstride;
     }
 }
 
@@ -106,8 +103,8 @@ pub fn init_fft() {
     *tw.at_mut(120) = cpx(6.123234e-17, -1.0);
     *tw.at_mut(240) = cpx(-1.0, -1.2246469e-16);
     *tw.at_mut(360) = cpx(-1.8369701e-16, 1.0);
-    compute_bitrev_table(0, &mut t.bitrev480, 0, 1, &fft_state48000_960_0.factors);
-    compute_bitrev_table(0, &mut t.bitrev60, 0, 1, &fft_state48000_960_3.factors);
+    compute_bitrev_table(0, &mut t.bitrev480, 1, &fft_state48000_960_0.factors);
+    compute_bitrev_table(0, &mut t.bitrev60, 1, &fft_state48000_960_3.factors);
 }
 
 // SAFETY: repr(C) pair of f32, no padding, every bit pattern valid.
@@ -149,31 +146,25 @@ fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
     let tw: f32 = 0.7071067812f32;
     /* We know that m==4 here because the radix-2 is just after a radix-4 */
     debug_assert!(m == 4);
-    let mut o = 0usize;
-    for _ in 0..N {
-        // IX-HARD: provable in principle (`f` has 8 elements, indices 0..8), but only if the optimizer
-        // folds `o + 8 - o`; `Fout.len() >= o + 8` is otherwise checked once per butterfly.
-        // The butterflies are the hot loop, so the plain-indexing conversion needs a benchmark.
-        let f = Fout.rg_mut(o..o + 8);
-        let mut t = f.at(4);
-        *f.at_mut(4) = C_SUB(f.at(0), t);
-        C_ADDTO(f.at_mut(0), t);
+    for f in &mut Fout.as_chunks_mut::<8>().0[..N as usize] {
+        let mut t = f[4];
+        f[4] = C_SUB(f[0], t);
+        C_ADDTO(&mut f[0], t);
 
-        t.r = (f.at(5).r + f.at(5).i) * tw;
-        t.i = (f.at(5).i - f.at(5).r) * tw;
-        *f.at_mut(5) = C_SUB(f.at(1), t);
-        C_ADDTO(f.at_mut(1), t);
+        t.r = (f[5].r + f[5].i) * tw;
+        t.i = (f[5].i - f[5].r) * tw;
+        f[5] = C_SUB(f[1], t);
+        C_ADDTO(&mut f[1], t);
 
-        t.r = f.at(6).i;
-        t.i = -f.at(6).r;
-        *f.at_mut(6) = C_SUB(f.at(2), t);
-        C_ADDTO(f.at_mut(2), t);
+        t.r = f[6].i;
+        t.i = -f[6].r;
+        f[6] = C_SUB(f[2], t);
+        C_ADDTO(&mut f[2], t);
 
-        t.r = (f.at(7).i - f.at(7).r) * tw;
-        t.i = (-(f.at(7).i + f.at(7).r)) * tw;
-        *f.at_mut(7) = C_SUB(f.at(3), t);
-        C_ADDTO(f.at_mut(3), t);
-        o += 8;
+        t.r = (f[7].i - f[7].r) * tw;
+        t.i = (-(f[7].i + f[7].r)) * tw;
+        f[7] = C_SUB(f[3], t);
+        C_ADDTO(&mut f[3], t);
     }
 }
 
