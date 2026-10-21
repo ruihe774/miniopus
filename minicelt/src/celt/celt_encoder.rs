@@ -780,6 +780,7 @@ pub fn median_of_5(x: &[f32]) -> f32 {
 }
 
 /// Median of `x[0..3]`.
+#[inline(always)]
 pub fn median_of_3(x: &[f32]) -> f32 {
     debug_assert!(x.len() >= 3);
     let Some(&[x0, x1, t2]) = x.first_chunk::<3>() else {

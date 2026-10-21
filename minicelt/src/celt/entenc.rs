@@ -198,6 +198,7 @@ pub fn ec_enc_bits(this: &mut ec_enc, fl: u32, bits: u32) {
     this.nbits_total += bits as i32;
 }
 
+#[inline(always)]
 pub fn ec_enc_shrink(this: &mut ec_enc, size: u32) {
     debug_assert!(this.offs + this.end_offs <= size);
     unsafe {
