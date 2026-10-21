@@ -119,7 +119,7 @@ fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
     if channels == 2 {
         let mut m0 = hp_mem[0];
         let mut m2 = hp_mem[2];
-        for f in buf[..2 * FRAME_SIZE as usize].chunks_exact_mut(2) {
+        for f in buf[..2 * FRAME_SIZE as usize].as_chunks_mut::<2>().0 {
             let (x0, x1) = (f[0], f[1]);
             let out0 = x0 - m0;
             let out1 = x1 - m2;

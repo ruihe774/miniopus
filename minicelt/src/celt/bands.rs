@@ -96,9 +96,9 @@ pub fn bitexact_log2tan(mut isin: i32, mut icos: i32) -> i32 {
 /// (C amp2Log2, which always follows; `effEnd == end`, so no `-14` fill).
 pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], bandLogE: &mut [f32], end: i32, C: i32) {
     /* LM == 3 */
-    let LM = 3;
+    const LM: i32 = 3;
     let eBands = modes::eBands;
-    let N = (modes::shortMdctSize << LM) as usize;
+    const N: usize = (modes::shortMdctSize << LM) as usize;
     const NB: usize = modes::nbEBands as usize;
     debug_assert!(
         X.len() >= C as usize * N
@@ -106,9 +106,11 @@ pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], bandLogE: &mut [f32],
             && bandLogE.len() >= C as usize * NB
     );
     for ((Xc, bandEc), bandLogEc) in X
-        .chunks_exact(N)
-        .zip(bandE.chunks_exact_mut(NB))
-        .zip(bandLogE.chunks_exact_mut(NB))
+        .as_chunks::<N>()
+        .0
+        .iter()
+        .zip(bandE.as_chunks_mut::<NB>().0)
+        .zip(bandLogE.as_chunks_mut::<NB>().0)
         .take(C as usize)
     {
         for (((e, l), b), &mean) in bandEc

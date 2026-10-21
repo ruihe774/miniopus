@@ -290,7 +290,7 @@ pub fn transient_analysis(
                 + inv_table[u32x4_extract_lane::<2>(id) as usize & 127] as i32
                 + inv_table[u32x4_extract_lane::<3>(id) as usize & 127] as i32;
         }
-        for q in rest.chunks_exact(4) {
+        for q in rest.as_chunks::<4>().0 {
             let v: f64 = floor64((64.0 * norm * (q[0] + EPSILON)) as f64);
             let id = (v as usize).min(127);
             unmask += inv_table[id] as i32;
