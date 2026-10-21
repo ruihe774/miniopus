@@ -1,6 +1,5 @@
 //! Port of celt/cwrs.c (encoder side, static pulse cache: no SMALL_FOOTPRINT, no CUSTOM_MODES).
 
-use super::arch::Ix;
 use super::arch::{IMAX, IMIN};
 use super::entcode::ec_enc;
 use super::entenc::ec_enc_uint;
@@ -54,13 +53,20 @@ pub fn init_cwrs() {
 #[inline(always)]
 fn CELT_PVQ_U(_n: i32, _k: i32) -> u32 {
     // IX-HARD: both indices come from `n`/`k` through the ROW table (`ROW[min] + max`), so there is no
-    // length the compiler could prove them against: keep `Ix` (this is on the PVQ encode path, two
+    // length the compiler could prove them against: keep it unchecked (this is on the PVQ encode path, two
     // lookups per pulse position in icwrs, and measurably hot). Tried: clamping both indices
     // (`ROW[lo.min(14)]`, `(..).min(1271)`: two selects) +0.5..+0.85 % encode time, +84 B; `get(..)
     // .unwrap_or(0)` on both (branches over the loads, no panic path) +0.5..+1.1 %, +122 B. A table
     // padded to a power of two for a mask would cost 3 KiB of .bss, which the one-page module lacks.
     // SAFETY: init_cwrs ran before the first encode; the table is only read here.
-    unsafe { (*CELT_PVQ_U_DATA.0.get()).at(CELT_PVQ_U_ROW.at(IMIN(_n, _k) as usize) as usize + IMAX(_n, _k) as usize) }
+    let (lo, hi) = (IMIN(_n, _k) as usize, IMAX(_n, _k) as usize);
+    debug_assert!(lo < CELT_PVQ_U_ROW.len());
+    unsafe {
+        let i = *CELT_PVQ_U_ROW.get_unchecked(lo) as usize + hi;
+        let data = &*CELT_PVQ_U_DATA.0.get();
+        debug_assert!(i < data.len());
+        *data.get_unchecked(i)
+    }
 }
 
 /*V(N,K) := U(N,K)+U(N,K+1) = the number of PVQ codewords for a band of size N

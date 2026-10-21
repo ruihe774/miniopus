@@ -78,7 +78,7 @@ unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
         let mut sum2 = sum0;
         let mut sum3 = sum0;
         /* Same lag-per-lane layout as the C kernel and SSE port: each x[j] is
-        broadcast and multiplied with y.rg(j..j+3). */
+        broadcast and multiplied with y[j..j+3]. */
         let mut j = 0usize;
         while j + 3 < len {
             let xj = ld(x.add(j));

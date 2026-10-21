@@ -9,7 +9,6 @@
 //! folding source `lowband` and the output `lowband_out` point into the `norm` buffer, and
 //! without resynthesis `lowband_scratch` points into X itself.
 
-use super::arch::Ix;
 use super::arch::{IMAX, IMIN, MIN32, Q31ONE};
 use super::entcode::{BITRES, EC_ILOG, celt_sudiv, celt_udiv, ec_ctx, ec_tell_frac};
 use super::entenc::{ec_enc_bit_logp, ec_enc_bits, ec_enc_uint, ec_encode};
@@ -341,21 +340,30 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let N = (N0 * stride) as usize;
     let tmp = st.alloc::<f32>(N);
     let (N0, stride) = (N0 as usize, stride as usize);
-    if hadamard != 0 {
-        let ordery = ordery_table.rg(stride - 2..);
-        for i in 0..stride {
-            for j in 0..N0 {
-                *tmp.at_mut(j * stride + i) = X.at(ordery.at(i) as usize * N0 + j);
+    // SAFETY: the indices are in range as in the C code (`tmp` has N = N0 * stride entries, X at least N, the
+    // `ordery_table` row has `stride` entries); the `debug_assert!`s check them in the `checked` profile.
+    unsafe {
+        debug_assert!(X.len() >= N);
+        if hadamard != 0 {
+            debug_assert!(stride - 2 + stride <= ordery_table.len());
+            let ordery = ordery_table.get_unchecked(stride - 2..);
+            for i in 0..stride {
+                let o = *ordery.get_unchecked(i) as usize;
+                for j in 0..N0 {
+                    debug_assert!(j * stride + i < N && o * N0 + j < X.len());
+                    *tmp.get_unchecked_mut(j * stride + i) = *X.get_unchecked(o * N0 + j);
+                }
+            }
+        } else {
+            for i in 0..stride {
+                for j in 0..N0 {
+                    debug_assert!(j * stride + i < N && i * N0 + j < X.len());
+                    *tmp.get_unchecked_mut(j * stride + i) = *X.get_unchecked(i * N0 + j);
+                }
             }
         }
-    } else {
-        for i in 0..stride {
-            for j in 0..N0 {
-                *tmp.at_mut(j * stride + i) = X.at(i * N0 + j);
-            }
-        }
+        X.get_unchecked_mut(..N).copy_from_slice(tmp);
     }
-    X.rg_mut(..N).copy_from_slice(tmp);
 }
 
 // IX-HARD: very sensitive to its loop shape (called per band and level from tf_analysis and quant_band, often
@@ -364,7 +372,7 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
 // - `chunks_exact_mut(2 * stride)` + `split_at_mut(stride)`, pair by pair: +1.0% (+124 B); with copies
 //   for the strides 1/2/4/8: +0.6%/+0.5% (+614 B); `match stride` on 1/2/4/8 to const-generic
 //   `as_chunks_mut::<{2 * stride}>` views (no division): +0.6..0.7% (+560..587 B); the same `match` around
-//   this Ix loop costs +0.6% too, so any stride dispatch is out; single form with `#[inline(always)]`:
+//   this unchecked loop costs +0.6% too, so any stride dispatch is out; single form with `#[inline(always)]`:
 //   +0.7%/+0.8% (+1.3 KiB).
 // - `X[i..].iter_mut().step_by(stride)` taken in pairs: +1.0% (two end tests per pair).
 // - one loop over `k += 2 * stride` with `k < n - stride`: the `X[k + stride]` check stays in the loop.
@@ -377,10 +385,16 @@ pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     let stride = stride as usize;
     for i in 0..stride {
         for j in 0..N0 as usize {
-            let tmp1 = 0.70710678f32 * X.at(stride * 2 * j + i);
-            let tmp2 = 0.70710678f32 * X.at(stride * (2 * j + 1) + i);
-            *X.at_mut(stride * 2 * j + i) = tmp1 + tmp2;
-            *X.at_mut(stride * (2 * j + 1) + i) = tmp1 - tmp2;
+            let (a, b) = (stride * 2 * j + i, stride * (2 * j + 1) + i);
+            // SAFETY: the callers pass X with at least `2 * N0 * stride` entries (N0 halved above), as in the
+            // C code; the `debug_assert!` checks it in the `checked` profile.
+            debug_assert!(a < X.len() && b < X.len());
+            unsafe {
+                let tmp1 = 0.70710678f32 * *X.get_unchecked(a);
+                let tmp2 = 0.70710678f32 * *X.get_unchecked(b);
+                *X.get_unchecked_mut(a) = tmp1 + tmp2;
+                *X.get_unchecked_mut(b) = tmp1 - tmp2;
+            }
         }
     }
 }

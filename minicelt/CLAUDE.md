@@ -39,7 +39,7 @@ Rust port of the libopus CELT-only float encoder for wasm32. Read `PORTING.md` b
 - Where the WASM SIMD fork (https://github.com/ruihe774/opus-wasm-simd, branch `v1.6.1-wasm-simd`) has
   a kernel, port it with `core::arch::wasm32`; add no scalar fallback.
   Relaxed SIMD uses `cfg(target_feature = "relaxed-simd")`.
-- Bounds checks: plain indexing where provable, `arch::Ix` only for the `IX-HARD` sites (PORTING.md
+- Bounds checks: plain indexing where provable, inline `get_unchecked` behind a `debug_assert!` only for the `IX-HARD` sites (PORTING.md
   "Bounds checks"); no check added in a per-sample loop, and bench encode time (`test/bench.ts`).
 - Keep C function/field/constant names. Comment density follows the C comments that explain the algorithm.
 - `src/` is BSD-3 (libopus derivative).

@@ -105,14 +105,15 @@ bit-exact comparison below. What was removed or specialized:
   `match` on a bounded value, iterators, `chunks_exact`, a re-slice hoisted out of the loop) the code uses
   plain indexing, which is checked in every profile and adds no check in a per-sample loop. Where it
   cannot (indices read out of tables or computed from coded values, caller-sized slices at offsets from the
-  band table, strided per-sample loops whose iterator form measured slower) indexing goes through
-  `arch::Ix` (`x.at(i)`, `*x.at_mut(i) = v`, `x.rg(a..b)`), unchecked like C in release and checked in the
-  `checked` profile (debug assertions). Every function that still uses `Ix` has an `IX-HARD` comment
+  band table, strided per-sample loops whose iterator form measured slower) indexing is inlined
+  as `get_unchecked`/`get_unchecked_mut` in an `unsafe` block behind a `debug_assert!` on the indices
+  (unchecked like C in release, checked in the `checked` profile). There is no indexing helper type any
+  more (`arch::Ix` was removed). Every function that still does this has an `IX-HARD` comment
   giving the reason and, where a conversion was tried, its measured cost (bytes, encode time). The rule
   for a conversion: no bounds check added inside a per-sample loop (a check hoisted out of the loop, or in
   a band-level loop that runs once per frame, is fine), size is a soft constraint, and the encode time
   measured with `minicelt/test/bench.ts` must stay within noise (about 0.2 %). `haar1`,
-  `interleave_hadamard` and the `CELT_PVQ_U` lookup were tried and kept on `Ix` on that measure (their
+  `interleave_hadamard` and the `CELT_PVQ_U` lookup were tried and kept unchecked on that measure (their
   `IX-HARD` comments list the attempts). New code
   should follow the same split, and run the `checked` tests.
 - Memory: the pseudostack is 16 KiB and the shadow stack 8 KiB (the module stays one page up to about
@@ -142,7 +143,7 @@ Speed regressions: `minicelt/test/bench.ts` (Deno; usage in its header) encodes 
 speech corpus with two builds, interleaved, and prints min/median time and output size per
 configuration. Differences below about 0.2 % are noise. Run it for any change that touches a hot loop
 (it covers mono at 24 and 64 kbps and stereo at 6 to 128 kbps, complexity 5 and 10, i.e. every function
-changed in the Ix conversion; `stereo_fade` only runs for stereo at 24 kbps and below. It does not
+changed in the bounds-check conversion; `stereo_fade` only runs for stereo at 24 kbps and below. It does not
 cover packet loss, bandwidth limits, DTX or constrained VBR, nor low complexity).
 
 Coverage: `scripts/coverage.sh [--quick]` builds an unoptimized module (so functions are not inlined
@@ -188,8 +189,8 @@ as the `coverage` job (log only, never fails the workflow, nothing uploaded). Th
   use it.
   `floor(.5+x)` stays exactly that.
 - Arrays: prefer slices (`&[f32]`, `&mut [i32]`), indexed plainly where the bounds are provable and
-  with `arch::Ix` (`x.at(i)`, `*x.at_mut(i) = v`, `x.rg(a..b)`, `x.rg_mut(a..b)`: unchecked in release,
-  checked in the `checked` profile) where they are not (see "Bounds checks" above).
+  with `get_unchecked` behind a `debug_assert!` (unchecked in release, checked in the `checked` profile)
+  where they are not (see "Bounds checks" above).
   Where C uses negative offsets or pointer arithmetic into a larger buffer,
   pass the buffer plus an offset, or use raw pointers; `unsafe` is allowed anywhere. C argument
   order is kept; `const T *` → `&[T]`, `T *` output → `&mut [T]` / `&mut T`.
