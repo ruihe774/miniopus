@@ -169,10 +169,6 @@ fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
     }
 }
 
-// IX-HARD: `Fout.at(fo + k * m)` and `tw.at(k * fstride)`: offsets from the runtime `m`, `mm`, `fstride`.
-// (`scratch` and the `m == 1` branch, via `as_chunks_mut::<4>`, are plain.) Tried `split_at_mut` into four
-// sub-slices + zip + `tw.iter().step_by(k * fstride)`: no panic branch in the loop, but +560 B for this
-// function (+340 bfly3, +460 bfly5) and encode time +0.5 %, so the checked-free `Ix` form stays.
 #[inline(always)]
 fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     if m == 1 {
@@ -201,24 +197,24 @@ fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
             let (mut tw1, mut tw2, mut tw3) = (0usize, 0usize, 0usize);
             /* m is guaranteed to be a multiple of 4. */
             for _ in 0..m {
-                scratch[0] = C_MUL(Fout.at(fo + m), tw.at(tw1));
-                scratch[1] = C_MUL(Fout.at(fo + m2), tw.at(tw2));
-                scratch[2] = C_MUL(Fout.at(fo + m3), tw.at(tw3));
+                scratch[0] = C_MUL(Fout[fo + m], tw[tw1]);
+                scratch[1] = C_MUL(Fout[fo + m2], tw[tw2]);
+                scratch[2] = C_MUL(Fout[fo + m3], tw[tw3]);
 
-                scratch[5] = C_SUB(Fout.at(fo), scratch[1]);
-                C_ADDTO(Fout.at_mut(fo), scratch[1]);
+                scratch[5] = C_SUB(Fout[fo], scratch[1]);
+                C_ADDTO(&mut Fout[fo], scratch[1]);
                 scratch[3] = C_ADD(scratch[0], scratch[2]);
                 scratch[4] = C_SUB(scratch[0], scratch[2]);
-                *Fout.at_mut(fo + m2) = C_SUB(Fout.at(fo), scratch[3]);
+                Fout[fo + m2] = C_SUB(Fout[fo], scratch[3]);
                 tw1 += fstride;
                 tw2 += fstride * 2;
                 tw3 += fstride * 3;
-                C_ADDTO(Fout.at_mut(fo), scratch[3]);
+                C_ADDTO(&mut Fout[fo], scratch[3]);
 
-                Fout.at_mut(fo + m).r = scratch[5].r + scratch[4].i;
-                Fout.at_mut(fo + m).i = scratch[5].i - scratch[4].r;
-                Fout.at_mut(fo + m3).r = scratch[5].r - scratch[4].i;
-                Fout.at_mut(fo + m3).i = scratch[5].i + scratch[4].r;
+                Fout[fo + m].r = scratch[5].r + scratch[4].i;
+                Fout[fo + m].i = scratch[5].i - scratch[4].r;
+                Fout[fo + m3].r = scratch[5].r - scratch[4].i;
+                Fout[fo + m3].i = scratch[5].i + scratch[4].r;
                 fo += 1;
             }
         }
@@ -333,6 +329,8 @@ pub fn opus_fft_impl(st: &kiss_fft_state, fout: &mut [kiss_fft_cpx]) {
     if st.shift <= 0 {
         /* 480 points (shift -1, treated as 0) */
         debug_assert!(st.factors[..10] == [5, 96, 3, 32, 4, 8, 2, 4, 4, 1]);
+        /* a fixed length lets the constant-stride stages prove their indices */
+        let fout: &mut [kiss_fft_cpx; 480] = fout.first_chunk_mut().unwrap();
         kf_bfly4(fout, 120, tw, 1, 120, 4);
         kf_bfly2(fout, 4, 60);
         kf_bfly4(fout, 15, tw, 8, 15, 32);
@@ -341,6 +339,7 @@ pub fn opus_fft_impl(st: &kiss_fft_state, fout: &mut [kiss_fft_cpx]) {
     } else {
         /* 60 points (shift 3) */
         debug_assert!(st.shift == 3 && st.factors[..6] == [5, 12, 3, 4, 4, 1]);
+        let fout: &mut [kiss_fft_cpx; 60] = fout.first_chunk_mut().unwrap();
         kf_bfly4(fout, 15 << 3, tw, 1, 15, 4);
         kf_bfly3(fout, 5 << 3, tw, 4, 5, 12);
         kf_bfly5(fout, 1 << 3, tw, 12, 1, 1);
