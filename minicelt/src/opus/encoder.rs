@@ -447,7 +447,11 @@ impl OpusEncoder {
         data[0] = 0;
         let data_ptr = data.as_mut_ptr();
         let mut enc = ec_enc::new_zeroed();
-        ec_enc_init(&mut enc, data_ptr.wrapping_add(1), (PACKET_SIZE_CAP - 1) as u32);
+        ec_enc_init(
+            &mut enc,
+            data_ptr.wrapping_add(1),
+            (PACKET_SIZE_CAP - 1) as u32,
+        );
 
         /* No delay_buffer prefix: total_buffer == 0. The variable HP smoothing only feeds
         the VOIP high-pass. */

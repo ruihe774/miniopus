@@ -811,7 +811,16 @@ fn quant_partition(
             let K = get_pulses(q);
 
             /* Finally do the actual quantization */
-            cm = alg_quant(head_mut(X, N as usize), N, K, spread, B, ec, gain, ctx.resynth);
+            cm = alg_quant(
+                head_mut(X, N as usize),
+                N,
+                K,
+                spread,
+                B,
+                ec,
+                gain,
+                ctx.resynth,
+            );
         } else {
             /* If there's no pulse, fill the band anyway */
             if ctx.resynth != 0 {
@@ -1140,11 +1149,37 @@ fn quant_band_stereo(
             }
             /* For a stereo split, the high bits of fill are always zero, so no
             folding will be done to the side. */
-            cm |= quant_band(ctx, ec, Y, N, sbits, B, None, LM, None, side, None, fill >> B);
+            cm |= quant_band(
+                ctx,
+                ec,
+                Y,
+                N,
+                sbits,
+                B,
+                None,
+                LM,
+                None,
+                side,
+                None,
+                fill >> B,
+            );
         } else {
             /* For a stereo split, the high bits of fill are always zero, so no
             folding will be done to the side. */
-            cm = quant_band(ctx, ec, Y, N, sbits, B, None, LM, None, side, None, fill >> B);
+            cm = quant_band(
+                ctx,
+                ec,
+                Y,
+                N,
+                sbits,
+                B,
+                None,
+                LM,
+                None,
+                side,
+                None,
+                fill >> B,
+            );
             rebalance = sbits - (rebalance - ctx.remaining_bits);
             if rebalance > 3 << BITRES && itheta != 16384 {
                 mbits += rebalance - (3 << BITRES);
@@ -1207,7 +1242,10 @@ fn norm_views(
             debug_assert!(lowband.is_none_or(|l| l + n <= norm.len()));
             // SAFETY: `l + n <= norm.len()`.
             // UNSAFE-PERF: unchecked `norm[l..l + n]`.
-            (lowband.map(|l| unsafe { norm.get_unchecked(l..l + n) }), None)
+            (
+                lowband.map(|l| unsafe { norm.get_unchecked(l..l + n) }),
+                None,
+            )
         }
     }
 }
@@ -1250,7 +1288,10 @@ pub fn quant_all_bands(
     let (pulses, tf_res) = (&pulses[..end as usize], &tf_res[..end as usize]);
     debug_assert!(X_.len() >= (M * eb(end)) as usize);
     debug_assert!(collapse_masks.len() >= (C * end) as usize);
-    debug_assert!(Y_.as_ref().is_none_or(|y| y.len() >= (M * eb(end)) as usize));
+    debug_assert!(
+        Y_.as_ref()
+            .is_none_or(|y| y.len() >= (M * eb(end)) as usize)
+    );
     /* every band of the loop is below effEBands */
     debug_assert!(end <= modes::effEBands);
 
@@ -1456,8 +1497,8 @@ pub fn quant_all_bands(
                     Some(&mut lowband_scratch[..]),
                     cm as i32,
                 );
-                let dist0: f32 = w[0] * celt_inner_prod(X_save, X, N)
-                    + w[1] * celt_inner_prod(Y_save, Y, N);
+                let dist0: f32 =
+                    w[0] * celt_inner_prod(X_save, X, N) + w[1] * celt_inner_prod(Y_save, Y, N);
 
                 /* Save first result. */
                 let cm2 = x_cm;
@@ -1498,8 +1539,8 @@ pub fn quant_all_bands(
                     Some(&mut lowband_scratch[..]),
                     cm as i32,
                 );
-                let dist1: f32 = w[0] * celt_inner_prod(X_save, X, N)
-                    + w[1] * celt_inner_prod(Y_save, Y, N);
+                let dist1: f32 =
+                    w[0] * celt_inner_prod(X_save, X, N) + w[1] * celt_inner_prod(Y_save, Y, N);
                 if dist0 >= dist1 {
                     x_cm = cm2;
                     *ec = ec_save2;
