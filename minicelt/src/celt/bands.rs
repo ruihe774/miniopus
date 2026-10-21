@@ -32,6 +32,16 @@ fn FRAC_MUL16(a: i32, b: i32) -> i32 {
     (16384 + (a as i16 as i32) * (b as i16 as i32)) >> 15
 }
 
+/// `x[..n]` without the bounds check: the callers pass bands of exactly `n` floats, and the compiler then knows
+/// the length of the result (which the checked `x[..n]` also told it, so the later `[0]`/`[1]` need no check).
+#[inline(always)]
+fn head_mut(x: &mut [f32], n: usize) -> &mut [f32] {
+    debug_assert!(n <= x.len());
+    // SAFETY: `n <= x.len()`, as asserted above in the `checked` profile.
+    // UNSAFE-PERF: `get_unchecked_mut` instead of `x[..n]`.
+    unsafe { x.get_unchecked_mut(..n) }
+}
+
 /// `N` is the length of the tables; `prev` (the previous decision) is in `0..=N`.
 pub fn hysteresis_decision<const N: usize>(
     val: f32,
@@ -595,7 +605,7 @@ fn compute_theta(
     } else if stereo != 0 {
         inv = (itheta > 8192) as i32;
         if inv != 0 {
-            for y in &mut Y[..N as usize] {
+            for y in Y.iter_mut() {
                 *y = -*y;
             }
         }
@@ -684,7 +694,7 @@ static split_thresh: [u8; 4 * modes::nbEBands as usize] = {
 It can split the band in two and transmit the energy difference with
 the two half-bands. It can be called recursively so bands can end up being
 split in 8 parts. */
-/// `X` holds the `N` floats of the partition; `lowband`, if any, at least `N`.
+/// `X` holds exactly the `N` floats of the partition; `lowband`, if any, at least `N`.
 fn quant_partition(
     ctx: &mut band_ctx,
     ec: &mut ec_ctx,
@@ -708,8 +718,11 @@ fn quant_partition(
         let mut sctx = split_ctx::default();
 
         N >>= 1;
-        let (X, Y) = X.split_at_mut(N as usize);
-        let Y = &mut Y[..N as usize];
+        debug_assert!(X.len() == 2 * N as usize);
+        // SAFETY: `X` has exactly the `2 * N` floats of the partition (see the doc comment), so the split is in range.
+        // UNSAFE-PERF: `split_at_mut_unchecked` instead of the checked `split_at_mut`.
+        let (X, Y) = unsafe { X.split_at_mut_unchecked(N as usize) };
+        let Y = head_mut(Y, N as usize);
         LM -= 1;
         if B == 1 {
             fill = (fill & 1) | (fill << 1);
@@ -798,7 +811,7 @@ fn quant_partition(
             let K = get_pulses(q);
 
             /* Finally do the actual quantization */
-            cm = alg_quant(&mut X[..N as usize], N, K, spread, B, ec, gain, ctx.resynth);
+            cm = alg_quant(head_mut(X, N as usize), N, K, spread, B, ec, gain, ctx.resynth);
         } else {
             /* If there's no pulse, fill the band anyway */
             if ctx.resynth != 0 {
@@ -806,7 +819,7 @@ fn quant_partition(
                 16-bit platform; use a long to get defined behavior.*/
                 let cm_mask: u32 = (1u32 << B) - 1;
                 fill = (fill as u32 & cm_mask) as i32;
-                let x = &mut X[..N as usize];
+                let x = head_mut(X, N as usize);
                 if fill == 0 {
                     x.fill(0.0);
                 } else {
@@ -873,7 +886,7 @@ fn quant_band(
         return quant_band_n1(ctx, ec, X, None, lowband_out);
     }
     let n = N as usize;
-    let X = &mut X[..n];
+    let X = head_mut(X, n);
 
     if tf_change > 0 {
         recombine = tf_change;
@@ -887,7 +900,7 @@ fn quant_band(
     let mut work: Option<&mut [f32]> = None;
     if let (Some(scratch), Some(lowband)) = (lowband_scratch, lowband) {
         if needs_copy {
-            let scratch = &mut scratch[..n];
+            let scratch = head_mut(scratch, n);
             scratch.copy_from_slice(&lowband[..n]);
             work = Some(scratch);
         }
@@ -1009,7 +1022,7 @@ fn quant_band_stereo(
         return quant_band_n1(ctx, ec, X, Some(Y), lowband_out);
     }
     let n = N as usize;
-    let (X, Y) = (&mut X[..n], &mut Y[..n]);
+    let (X, Y) = (head_mut(X, n), head_mut(Y, n));
 
     let orig_fill = fill;
 
@@ -1179,10 +1192,23 @@ fn norm_views(
 ) -> (Option<&[f32]>, Option<&mut [f32]>) {
     match out_start {
         Some(o) => {
-            let (before, after) = norm.split_at_mut(o);
-            (lowband.map(|l| &before[l..l + n]), Some(&mut after[..n]))
+            debug_assert!(o + n <= norm.len() && lowband.is_none_or(|l| l + n <= o));
+            // SAFETY: `o <= norm.len()`, `o + n <= norm.len()` and `l + n <= o` (the source lies left of the output).
+            // UNSAFE-PERF: unchecked split/sub-slices instead of `split_at_mut`, `before[l..l + n]` and `after[..n]`.
+            unsafe {
+                let (before, after) = norm.split_at_mut_unchecked(o);
+                (
+                    lowband.map(|l| before.get_unchecked(l..l + n)),
+                    Some(after.get_unchecked_mut(..n)),
+                )
+            }
         }
-        None => (lowband.map(|l| &norm[l..l + n]), None),
+        None => {
+            debug_assert!(lowband.is_none_or(|l| l + n <= norm.len()));
+            // SAFETY: `l + n <= norm.len()`.
+            // UNSAFE-PERF: unchecked `norm[l..l + n]`.
+            (lowband.map(|l| unsafe { norm.get_unchecked(l..l + n) }), None)
+        }
     }
 }
 
