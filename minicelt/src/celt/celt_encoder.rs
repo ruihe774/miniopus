@@ -13,7 +13,7 @@ use super::entenc::{
     ec_enc_bit_logp, ec_enc_bits, ec_enc_done, ec_enc_icdf, ec_enc_shrink, ec_enc_uint,
 };
 use super::mathops::{
-    CELT_SIG_SCALE, EPSILON, PI, acos64, exp2, floor64, log2, maxabs, rcp, sqrt64,
+    CELT_SIG_SCALE, EPSILON, PI, acos64, exp2x2, floor64, log2, maxabs, rcp, sqrt64,
 };
 use super::mdct::clt_mdct_forward;
 use super::modes;
@@ -23,6 +23,11 @@ use super::rate::clt_compute_allocation;
 use crate::celt::mathops::{fmax, fmin, imax, imin};
 use crate::opus::defines::OPUS_INTERNAL_ERROR;
 use crate::stack;
+use core::arch::wasm32::{
+    f32x4, f32x4_add, f32x4_floor, f32x4_mul, f32x4_pmin, f32x4_splat, i32x4_extract_lane,
+    i32x4_trunc_sat_f32x4, i64x2_shuffle, u32x4_extract_lane, u32x4_min, u32x4_splat,
+    u32x4_trunc_sat_f32x4,
+};
 
 /// LM: log2 of the number of short blocks per frame (20 ms frames only).
 const LM: i32 = 3;
@@ -268,10 +273,24 @@ pub fn transient_analysis(
         that crash on NaN since it could result in a worse issue later on. */
         debug_assert!(!tmp[0].is_nan());
         debug_assert!(!norm.is_nan());
-        /* i = 12, 16, .., < len2-5 */
-        for q in tmp[12..LEN2 - 4].chunks_exact(4) {
-            /* Do not round to nearest. floor() is a double operation; the clamp to 0..127 (MIN32/MAX32 in
-            C) is done on the saturating integer conversion (also maps NaN to 0 like C's `(int)NaN` here) */
+        /* i = 12, 16, .., < len2-5, four at a time (f32x4_floor is the double floor() of the float
+        product); the table lookups stay scalar */
+        let (quads, rest) = tmp[12..LEN2 - 4].as_chunks::<16>();
+        let g = f32x4_splat(64.0 * norm);
+        for q in quads {
+            /* Do not round to nearest. The clamp to 0..127 (MIN32/MAX32 in C) is done on the saturating
+            integer conversion (also maps NaN to 0 like C's `(int)NaN` here) */
+            let x = f32x4_add(f32x4(q[0], q[4], q[8], q[12]), f32x4_splat(EPSILON));
+            let id = u32x4_min(
+                u32x4_trunc_sat_f32x4(f32x4_floor(f32x4_mul(g, x))),
+                u32x4_splat(127),
+            );
+            unmask += inv_table[u32x4_extract_lane::<0>(id) as usize & 127] as i32
+                + inv_table[u32x4_extract_lane::<1>(id) as usize & 127] as i32
+                + inv_table[u32x4_extract_lane::<2>(id) as usize & 127] as i32
+                + inv_table[u32x4_extract_lane::<3>(id) as usize & 127] as i32;
+        }
+        for q in rest.chunks_exact(4) {
             let v: f64 = floor64((64.0 * norm * (q[0] + EPSILON)) as f64);
             let id = (v as usize).min(127);
             unmask += inv_table[id] as i32;
@@ -959,9 +978,26 @@ pub fn dynalloc_analysis(
             /* surround_dynalloc[i] == 0 */
             *v = fmax(*v, 0.0);
         }
-        for (imp, &v) in importance[start..endu].iter_mut().zip(&f0[start..]) {
-            *imp = floor64((0.5f32 + 13.0 * exp2(fmin(v, 4.0))) as f64) as i32;
+        /* (start == 0) four bands at a time: exp2x2 is celt_exp2 per lane, f32x4_floor the double floor()
+        of the float, the conversion exact (0 < value < 256); padded to whole quads */
+        const NB4: usize = (modes::nbEBands as usize).next_multiple_of(4);
+        let mut fv = [0.0f32; NB4];
+        let mut imp = [0i32; NB4];
+        fv[..endu].copy_from_slice(&f0[..endu]);
+        for (x, o) in fv.as_chunks::<4>().0.iter().zip(imp.as_chunks_mut::<4>().0) {
+            let x = f32x4_pmin(f32x4_splat(4.0), f32x4(x[0], x[1], x[2], x[3]));
+            let e = exp2x2(x);
+            let e = i64x2_shuffle::<0, 2>(e, exp2x2(i64x2_shuffle::<1, 1>(x, x)));
+            let y = f32x4_add(f32x4_splat(0.5), f32x4_mul(f32x4_splat(13.0), e));
+            let y = i32x4_trunc_sat_f32x4(f32x4_floor(y));
+            *o = [
+                i32x4_extract_lane::<0>(y),
+                i32x4_extract_lane::<1>(y),
+                i32x4_extract_lane::<2>(y),
+                i32x4_extract_lane::<3>(y),
+            ];
         }
+        importance[..endu].copy_from_slice(&imp[..endu]);
         /* For non-transient CBR/CVBR frames, halve the dynalloc contribution */
         if constrained_vbr != 0 && isTransient == 0 {
             for v in &mut f0[start..] {

@@ -108,6 +108,10 @@ bit-exact comparison below. What was removed or specialized:
 - C `amp2Log2` always follows `compute_band_energies` and is folded into it (one loop computes `bandE` and
   `bandLogE`): -205 B, same speed. Taking `sqrt` and `log2` two bands at a time (`f32x4_sqrt`, `log2` on `f64x2`)
   gives the same packets but no measurable speedup (21-42 `log2` calls per frame) for +650 B, so it is not done.
+- Vectorized with the same packets: the `transient_analysis` floor loop (four samples per `f32x4_floor` and
+  saturating conversion, table lookups scalar) and the dynalloc importance (`mathops::exp2x2`, libm's `exp` on
+  `f64x2`, replaces the scalar `exp2`; then `f32x4_floor`): together -656 B and 0.2-1.4 % less encode time.
+  Batching the `remove_doubling` pitch gains four at a time was +1.5 KB and no faster, so it is not done.
 - Bounds checks: where the compiler can be given a proof (constant indices into fixed arrays, masks,
   `match` on a bounded value, iterators, `chunks_exact`, a re-slice hoisted out of the loop) the code uses
   plain indexing, which is checked in every profile and adds no check in a per-sample loop. Where it

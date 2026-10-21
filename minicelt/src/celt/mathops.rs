@@ -1,8 +1,11 @@
 //! Port of celt/mathops.h and celt/mathops.c (float build, without FLOAT_APPROX).
 
 use core::arch::wasm32::{
-    f32x4_extract_lane, f32x4_neg, f32x4_pmax, f32x4_pmin, f32x4_splat, f64x2_extract_lane,
-    f64x2_floor, f64x2_splat, f64x2_sqrt, i32x4_shuffle, i64x2_shuffle, v128, v128_load,
+    f32x4_add, f32x4_demote_f64x2_zero, f32x4_extract_lane, f32x4_neg, f32x4_pmax, f32x4_pmin,
+    f32x4_splat, f64x2_add, f64x2_convert_low_i32x4, f64x2_div, f64x2_extract_lane, f64x2_floor,
+    f64x2_mul, f64x2_promote_low_f32x4, f64x2_splat, f64x2_sqrt, f64x2_sub, i32x4_shuffle,
+    i32x4_trunc_sat_f32x4, i64x2_add, i64x2_extend_low_i32x4, i64x2_shl, i64x2_shuffle,
+    i64x2_splat, v128, v128_load,
 };
 
 pub const CELT_SIG_SCALE: f32 = 32768.0;
@@ -224,12 +227,13 @@ pub fn log2(x: f32) -> f32 {
     let dk = k as f64;
     (1.442695040888963387 * (s * (hfsq + r) + dk * LN2_LO - hfsq + f + dk * LN2_HI)) as f32
 }
-/// `(float)exp(0.6931471805599453094*(x))` for `0 <= x <= 4` (its only use, the dynalloc
-/// importance, passes `MIN32(4, follower)` with `follower >= 0`); C celt_exp2, celt_exp2_db. This is
-/// libm's `exp` (FreeBSD e_exp.c) without the special cases and `scalbn`: the reduction
+/// `(float)exp(0.6931471805599453094*(x))` for `0 <= x <= 4` on the `f32` lanes 0 and 1 of `x`
+/// (results in lanes 0 and 1, lanes 2 and 3 zero); C celt_exp2, celt_exp2_db. Its only use, the
+/// dynalloc importance, passes `MIN32(4, follower)` with `follower >= 0`. This is libm's `exp`
+/// (FreeBSD e_exp.c) on `f64x2` without the special cases and `scalbn`: the reduction
 /// `x*ln2 = k*ln2 + r` takes `k` as `x` rounded half up (`0 <= k <= 4`), and `2^k` is exact.
-/// The result is bit for bit that of `libm::exp` (checked for every `f32` in `[0, 4]`).
-pub fn exp2(x: f32) -> f32 {
+/// Each lane is bit for bit `libm::exp` (no fused multiply-add; checked for every `f32` in `[0, 4]`).
+pub fn exp2x2(x: v128) -> v128 {
     const LN2_HI: f64 = 6.93147180369123816490e-01;
     const LN2_LO: f64 = 1.90821492927058770002e-10;
     const P: [f64; 5] = [
@@ -239,16 +243,28 @@ pub fn exp2(x: f32) -> f32 {
         -1.65339022054652515390e-06,
         4.13813679705723846039e-08,
     ];
-    debug_assert!(x >= 0.0 && x <= 4.0);
-    let k = (x + 0.5) as i32;
-    let hi = 0.6931471805599453094 * x as f64 - k as f64 * LN2_HI; /* k*LN2_HI is exact */
-    let lo = k as f64 * LN2_LO;
-    let r = hi - lo;
-    /* exp(r) = 1 + 2r/(2 - c) - r with c = r - r*r*P(r*r) */
-    let rr = r * r;
-    let c = r - rr * (P[0] + rr * (P[1] + rr * (P[2] + rr * (P[3] + rr * P[4]))));
-    let y = 1. + (r * c / (2. - c) - lo + hi);
-    (y * f64::from_bits(((0x3ff + k) as u64) << 52)) as f32
+    let k = i32x4_trunc_sat_f32x4(f32x4_add(x, f32x4_splat(0.5)));
+    let dk = f64x2_convert_low_i32x4(k);
+    let hi = f64x2_sub(
+        f64x2_mul(
+            f64x2_splat(0.6931471805599453094),
+            f64x2_promote_low_f32x4(x),
+        ),
+        f64x2_mul(dk, f64x2_splat(LN2_HI)),
+    );
+    let lo = f64x2_mul(dk, f64x2_splat(LN2_LO));
+    let r = f64x2_sub(hi, lo);
+    let rr = f64x2_mul(r, r);
+    /* c + rr*a for the Horner steps */
+    let p = |c: f64, a: v128| f64x2_add(f64x2_splat(c), f64x2_mul(rr, a));
+    let c = f64x2_sub(
+        r,
+        f64x2_mul(rr, p(P[0], p(P[1], p(P[2], p(P[3], f64x2_splat(P[4])))))),
+    );
+    let y = f64x2_div(f64x2_mul(r, c), f64x2_sub(f64x2_splat(2.0), c));
+    let y = f64x2_add(f64x2_splat(1.0), f64x2_add(f64x2_sub(y, lo), hi));
+    let scale = i64x2_shl(i64x2_add(i64x2_extend_low_i32x4(k), i64x2_splat(0x3ff)), 52);
+    f32x4_demote_f64x2_zero(f64x2_mul(y, scale))
 }
 
 /// `acos(x)` (double) for `|x| < 1`: libm's `acos` (FreeBSD e_acos.c) with the hardware
