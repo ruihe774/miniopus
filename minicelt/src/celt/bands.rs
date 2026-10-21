@@ -355,6 +355,8 @@ fn deinterleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
 // the rows of X, `i = ordery_inv[r]`): `tmp.chunks_exact_mut(stride).zip(src)` with `t[i] = x`, check-free in
 // the loop but a division per row: +0.14%/+0.13% encode time (wasm2, min/median), +0.07% (wasm3), +40 B;
 // a `tmp.get_mut(k)`/break form (no division, one compare per sample): +0.21%/+0.17% (wasm2). Not converted.
+// Re-measured at opt-level 2 / inline-threshold=0: the `chunks_exact_mut` form is 0..-0.3% (wasm2, -252 B) but
+// +0.1..+0.5% (wasm3, -130 B); the `get_mut` form -0.4..+0.4% (wasm2), +0.1..+1.0% (wasm3). Still not converted.
 fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
@@ -400,6 +402,8 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
 //   +0.45% (+106 B).
 // - column order kept (`for i in 0..stride`, `chunks_exact_mut(2 * stride)`, `c[i]`/`c[stride + i]`): the
 //   index checks stay in the inner loop, and +0.4%/+0.55% (+145 B).
+// Re-measured at opt-level 2 / inline-threshold=0: `chunks_exact_mut(2 * stride)` + `split_at_mut` +0.7..+1.0%
+// (wasm2, +302 B), +1.0..+1.6% (wasm3); the `Cell` view 0..-0.3% (wasm2, +111 B) but +0.15..+0.8% (wasm3, +233 B).
 pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     N0 >>= 1;
     let stride = stride as usize;

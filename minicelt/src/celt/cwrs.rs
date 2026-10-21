@@ -62,6 +62,8 @@ fn CELT_PVQ_U(_n: i32, _k: i32) -> u32 {
     // (`ROW[lo.min(14)]`, `(..).min(1271)`: two selects) +0.5..+0.85 % encode time, +84 B; `get(..)
     // .unwrap_or(0)` on both (branches over the loads, no panic path) +0.5..+1.1 %, +122 B. A table
     // padded to a power of two for a mask would cost 3 KiB of .bss, which the one-page module lacks.
+    // Re-measured at opt-level 2 / inline-threshold=0: clamp +0.1..+0.6 % (wasm2) / +0.1..+0.7 % (wasm3),
+    // +88 B; `get` form +0.1..+0.3 % / 0..+0.4 %, +122 B. Same verdict.
     // SAFETY: init_cwrs ran before the first encode; the table is only read here.
     let (lo, hi) = (_n.min(_k) as usize, _n.max(_k) as usize);
     debug_assert!(lo < CELT_PVQ_U_ROW.len());
