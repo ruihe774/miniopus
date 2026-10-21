@@ -12,7 +12,7 @@ v=${2:-all}
 p=${3:-release}
 build() { # $1 = crate, $2 = variant, $3 = target features, $4 = target dir, $5 = profile
   cargo build --profile "$5" -p "$1-wasm" --target wasm32-unknown-unknown \
-    --config "target.wasm32-unknown-unknown.rustflags=[\"-Ctarget-feature=$3\"]" --target-dir "$4"
+    --config "target.wasm32-unknown-unknown.rustflags=[\"-Ctarget-feature=$3\", \"-Cllvm-args=-inline-threshold=0\"]" --target-dir "$4"
   suffix=; [ "$5" = checked ] && suffix=-checked
   out="$4/wasm32-unknown-unknown/$5/$1_wasm.wasm"
   if [ "$5" = release ]; then
