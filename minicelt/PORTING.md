@@ -103,7 +103,7 @@ packet-identity regression check below. What was removed or specialized:
   All four are bit for bit equal to `libm`'s, checked exhaustively over the inputs they can see.
 - `mathops::maxabs` is vectorized (`f32x4_pmax`/`f32x4_pmin`, which are the C ternaries `fmax`/`fmin` with the
   operands swapped; min and max do not depend on the order): packets identical to the scalar loop, 2-5 % less
-  encode time in the former V8 `bench.ts` (it scans every frame three times). `minicelt/test/bench_maxabs.ts` microbenchmarks it.
+  encode time in `bench.ts` under V8 (it scans every frame three times). `minicelt/test/bench_maxabs.ts` microbenchmarks it.
 - C `amp2Log2` always follows `compute_band_energies` and is folded into it (one loop computes `bandE` and
   `bandLogE`): -205 B, same speed. Taking `sqrt` and `log2` two bands at a time (`f32x4_sqrt`, `log2` on `f64x2`)
   gives the same packets but no measurable speedup (21-42 `log2` calls per frame) for +650 B, so it is not done.
@@ -122,7 +122,7 @@ packet-identity regression check below. What was removed or specialized:
   giving the reason and, where a conversion was tried, its measured cost (bytes, encode time). The rule
   for a conversion: no bounds check added inside a per-sample loop (a check hoisted out of the loop, or in
   a band-level loop that runs once per frame, is fine), size is a soft constraint, and the encode time
-  measured with `scripts/bench.sh` must stay within noise. `haar1`,
+  measured on the bench backends (Deno, Bun, Wasmtime; "Bench backends" below) must stay within noise. `haar1`,
   `interleave_hadamard` and the `CELT_PVQ_U` lookup were tried and kept unchecked on that measure (their
   `IX-HARD` comments list the attempts). New code
   should follow the same split, and run the `checked` tests.
@@ -149,14 +149,13 @@ does not see small changes). Mono/stereo, complexity 0..10, bitrates from 500 to
 on/off, packet loss, bandwidths, DTX, i16/f32, dynamic ctl changes and the speech corpus were used,
 both variants.
 
-Speed regressions: `scripts/bench.sh` builds and runs `minicelt/bench`, a native harness (usage in
-`minicelt/bench/src/main.rs`) that compiles the builds ahead of time with Wasmtime (Cranelift) and, on
-request, Wasmer (Cranelift, or LLVM with `-e wasmer-llvm`, which needs LLVM 22; Wasmer's Cranelift has no
-tail calls and skips the WASM 3.0 variant). With no tiering JIT, the code that runs is the same on every
-run (the V8-based `bench.ts` it replaces depended on V8's tier-up decisions). It encodes the concatenated
-speech corpus with several builds, interleaved, and prints min/median time and output size per
-configuration. The remaining noise is the machine's: measure it with an A/A run (one build against a copy
-of itself) and run nothing else meanwhile. Run it for any change that touches a hot loop
+Speed regressions: one benchmark on three backends ("Bench backends" below). `minicelt/test/bench.ts`
+(usage in its header) runs under Deno (V8) and Bun (JavaScriptCore), whose tiering JITs can run different
+code from run to run. `scripts/bench.sh` builds and runs `minicelt/bench`, a native harness (usage in
+`minicelt/bench/src/main.rs`) that compiles the builds ahead of time with Wasmtime (Cranelift), so the code
+that runs is the same on every run. Both encode the concatenated speech corpus with several builds,
+interleaved, and print min/median time and output size per configuration. Measure the noise with an A/A
+run (one build against a copy of itself) and run nothing else meanwhile. Run it for any change that touches a hot loop
 (it covers mono at 24 and 64 kbps and stereo at 6 to 128 kbps, complexity 5 and 10, i.e. every function
 changed in the bounds-check conversion; `stereo_fade` only runs for stereo at 24 kbps and below. It does not
 cover packet loss, bandwidth limits, DTX or constrained VBR, nor low complexity).
@@ -169,6 +168,60 @@ points (function entries, loop headers, branch arms, returns; not source lines),
 as the `coverage` job (log only, never fails the workflow, nothing uploaded). The workload is its own, not
 `compare.ts`'s, so a function it reports as never entered may still be reached by the test suite
 (`quant_band_n1`, for one, is not reached by the speech corpus).
+
+## Bench backends
+
+Speed is measured on Deno (V8) and Bun (JavaScriptCore) with `minicelt/test/bench.ts`, and on Wasmtime
+(Cranelift, ahead of time) with `scripts/bench.sh`. Wasmer is excluded: its Cranelift and LLVM engines stay
+in `minicelt/bench` (`-e wasmer-cranelift`, `-e wasmer-llvm`), but changes are not judged by them.
+
+Why Wasmer is excluded: Wasmer-Cranelift adds nothing over Wasmtime (same code generator, within -1 to +6 %
+of it), and Wasmer-LLVM 7.5.0 (LLVM 22.1.2) is 1.4-4x slower than Wasmtime because of how it translates
+SIMD into LLVM IR, not because of minicelt:
+
+- `v128.bitselect` and `*.relaxed_laneselect` become `select <128 x i1>` over `i128` bitcasts
+  (`wasmer-compiler-llvm` `translator/code.rs`, the `V128Bitselect` arm). The AArch64 backend scalarises
+  that into one bit extract and one byte-lane insert per bit, instead of one `bsl`. It hits the PVQ pulse
+  search (`vq.rs`, the `laneselect` calls, inlined into `quant_partition`): 81 % of that loop's ~1800
+  instructions, `quant_partition` 11x slower than under Cranelift, and the gap grows with the bitrate
+  (more pulses). rustc canonicalises every mask-merge form back to `v128.bitselect`, so the source cannot
+  avoid it. Patching that arm to `and`/`andnot`/`or` on `<4 x i32>` (or rewriting the module, table below)
+made Wasmer-LLVM 2-3.6x faster from 24 kbps up, 1.05x at stereo 6 kbps (few pulses).
+- Every `v128` is an `i128` (locals, loop phis, loads), which AArch64 keeps in X-register pairs:
+  loop-carried accumulators cross between GPRs and NEON registers on every operation. `celt_pitch_xcorr`,
+  `celt_inner_prod` and `dual_inner_prod` are 4-7x slower than under Cranelift (24-30 % of their
+  instructions are such moves).
+- Memory accesses are `volatile`, with a dead load before every store, unless `non_volatile_memops(true)`
+  (not spec-exact): 3-16 % slower as shipped, 10-18 % once `bitselect` is patched.
+
+Results of 2026-10-21. Same machine and session throughout: aarch64, pinned to one Cortex-X925 core
+(`taskset -c 7`), Deno 2.9.5, Bun 1.4.4, Wasmtime 50.0.0, Wasmer 7.5.0. Min ms per run (639 frames,
+12.8 s of audio); the medians are within 0.5 % of the minimums.
+
+Engines, builds of 9931d8e (release, wasm-opt as in `scripts/build.sh`; re-encoded by `wasm-tools`, same
+code). The rewritten modules ("no bitselect") replace each `v128.bitselect` / `relaxed_laneselect` with
+`v128.and`/`v128.andnot`/`v128.or` on locals; packets are identical.
+
+| config | Deno w2 | Bun w2 | Wasmtime w2 | Deno w3 | Bun w3 | Wasmtime w3 | Wasmer-LLVM w2 | w2 no bitselect |
+|---|---|---|---|---|---|---|---|---|
+| ch=1 24k cx10 | 20.4 | 18.6 | 20.4 | 19.7 | 21.5 | 19.5 | 73.0 | 33.6 |
+| ch=1 64k cx10 | 24.7 | 22.9 | 24.9 | 23.8 | 25.5 | 23.8 | 108.7 | 38.9 |
+| ch=2 64k cx10 | 43.7 | 40.7 | 43.6 | 42.3 | 43.4 | 42.1 | 162.2 | 59.5 |
+| ch=2 128k cx10 | 63.7 | 60.0 | 64.0 | 61.2 | 62.0 | 61.5 | 305.3 | 83.7 |
+| ch=1 64k cx5 | 24.3 | 22.6 | 24.5 | 23.4 | 25.2 | 23.4 | 108.3 | 38.6 |
+| ch=2 6k cx10 | 20.0 | 18.1 | 19.5 | 19.4 | 21.0 | 18.8 | 33.6 | 31.7 |
+| ch=2 16k cx10 | 23.7 | 21.6 | 23.3 | 23.1 | 24.5 | 22.5 | 53.8 | 36.1 |
+| ch=2 24k cx10 | 33.3 | 30.8 | 33.3 | 32.4 | 33.8 | 32.2 | 85.8 | 47.6 |
+
+- Removing `bitselect` does not matter on the bench backends: Deno, Bun and Wasmtime are within -0.2 to
+  +0.6 % of the original, both variants (they emit one `bsl`).
+- WASM 3.0 is 3-4 % faster than 2.0 on Deno and Wasmtime but 3-16 % slower on Bun. Not `laneselect`
+  (the rewritten w3 is as slow); not investigated further.
+
+Release against `-checked` (debug assertions and overflow checks), builds of 1e1bfe5, w2: +27-35 % on
+Wasmtime (e.g. 26.3 -> 35.4 ms at ch=1 24k, 77.6 -> 98.4 at ch=2 128k), +5-8 % on Wasmer-LLVM (whose
+release build is already 1.4-4x slower). Same builds, Wasmtime against Wasmer-Cranelift and Wasmer-LLVM:
+26.3 / 26.7 / 77.1 ms at ch=1 24k, 77.6 / 76.8 / 313.1 at ch=2 128k, 28.1 / 29.8 / 40.3 at ch=2 6k.
 
 ## Conventions
 

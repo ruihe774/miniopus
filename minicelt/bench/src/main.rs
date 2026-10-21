@@ -9,8 +9,10 @@
 //!
 //! ENGINE is `wasmtime` (Cranelift), `wasmer-cranelift` or `wasmer-llvm` (feature `wasmer-llvm`, which
 //! scripts/bench.sh enables when asked for it; needs LLVM 22); repeat `-e` to run several, default `wasmtime`.
-//! Wasmer's Cranelift has no tail calls, so it skips the WASM 3.0 variant. Every build runs under every engine, and the first
-//! (engine, build) pair is the baseline. The workload is that of the former `bench.ts`: all of <audio dir>
+//! Wasmer's Cranelift has no tail calls, so it skips the WASM 3.0 variant. Only Wasmtime is a bench backend (with Deno and
+//! Bun running `minicelt/test/bench.ts`); the Wasmer engines are kept for investigation but excluded (minicelt/PORTING.md
+//! "Bench backends"). Every build runs under every engine, and the first
+//! (engine, build) pair is the baseline. The workload is that of `minicelt/test/bench.ts`: all of <audio dir>
 //! concatenated (16 kHz mono, x3 upsampled by repetition; the right channel of the stereo runs is a delayed,
 //! inverted copy of the left) through `minicelt_encode_i16`, one fresh instance per run, REPS (default 15)
 //! interleaved runs per configuration after one warm-up round. It prints min / median ms per implementation,

@@ -17,6 +17,9 @@ and `minicelt/` (CELT-only). Each crate has its own `CLAUDE.md` (scope) and `POR
   restructured loops) are fine as long as output stays correct (bit-exact for minisilk, within tolerance
   for minicelt). Judge changes by bounds checks, size, speed and test results. Each `PORTING.md`
   describes the fixed configuration, what was trimmed and why, the bounds-check conventions and the tests.
+- Bench backends (speed is measured on these): Deno (V8) and Bun (JavaScriptCore) with
+  `minicelt/test/bench.ts`, and Wasmtime with `scripts/bench.sh`. Wasmer (Cranelift, LLVM) is not a bench
+  backend: its code stays in `minicelt/bench` but its numbers do not count (minicelt/PORTING.md "Bench backends").
 
 ## Layout
 
@@ -32,6 +35,8 @@ and `minicelt/` (CELT-only). Each crate has its own `CLAUDE.md` (scope) and `POR
 - `scripts/build-native.sh` builds the native libopus references (`target/native/`).
 - `scripts/test.sh [silk|celt|all] [--quick]` builds everything and runs the comparisons.
 - `scripts/bench.sh [-e ENGINE]... <audio dir> label=path.wasm...`: minicelt encode-time A/B benchmark,
-  AOT-compiled by Wasmtime / Wasmer (`minicelt/bench`, a native crate outside the wasm workspace).
+  AOT-compiled by Wasmtime (default; Wasmer is kept but excluded) (`minicelt/bench`, a native crate outside
+  the wasm workspace). The same benchmark under V8 / JavaScriptCore:
+  `deno run -A minicelt/test/bench.ts <audio dir> label=path.wasm...`, `bun minicelt/test/bench.ts ...`.
 - `scripts/variance.ts` (Deno; after `build-native.sh`) measures how much upstream libopus' scalar and SIMD
   encoders differ (SILK, CELT); `scripts/select-clips.ts` cuts test clips from long recordings for it.
