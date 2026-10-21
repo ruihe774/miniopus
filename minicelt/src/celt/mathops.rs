@@ -25,10 +25,10 @@ pub fn floor64(x: f64) -> f64 {
 pub const PI: f64 = 3.1415926535897931;
 
 /// C celt_maxabs16, celt_maxabs_res.
-pub fn maxabs(x: &[f32], len: i32) -> f32 {
+pub fn maxabs(x: &[f32]) -> f32 {
     let mut maxval: f32 = 0.0;
     let mut minval: f32 = 0.0;
-    for &v in &x[..len as usize] {
+    for &v in x {
         maxval = maxval.max(v);
         minval = minval.min(v);
     }

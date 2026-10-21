@@ -319,8 +319,7 @@ impl OpusEncoder {
         self.rangeFinal = 0;
         /* "Cannot encode 100 ms in 1 byte" does not apply to 20 ms frames. */
 
-        let is_silence =
-            maxabs(pcm, FRAME_SIZE * self.channels) <= 1.0f32 / (1i32 << lsb_depth) as f32;
+        let is_silence = maxabs(pcm) <= 1.0f32 / (1i32 << lsb_depth) as f32;
         /* analysis_info.valid = 0: run_analysis() (complexity >= 7) is not ported, see the
         module comment; tonality_analysis_reset() has no observable effect either. */
 

@@ -1612,8 +1612,8 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
         pcm.copy_from_slice(&buf[..ccu * Nu]);
         let in_ = &mut *buf;
 
-        let mut sample_max: f32 = st.overlap_max.max(maxabs(pcm, C * (N - overlap)));
-        st.overlap_max = maxabs(&pcm[cu * (Nu - ovu)..], C * overlap);
+        let mut sample_max: f32 = st.overlap_max.max(maxabs(&pcm[..cu * (Nu - ovu)]));
+        st.overlap_max = maxabs(&pcm[cu * (Nu - ovu)..cu * Nu]);
         sample_max = sample_max.max(st.overlap_max);
         silence = (sample_max <= 1.0f32 / (1i32 << st.lsb_depth) as f32) as i32;
         /* tell == 1 */
