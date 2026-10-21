@@ -1,7 +1,7 @@
 # minisilk
 
 Rust port of the libopus SILK-only float encoder for wasm32. Read `PORTING.md` before changing
-`src/`; it holds the translation rules and test details.
+`src/`; it holds the configuration, trimming and test details.
 
 ## Scope (fixed, do not widen without asking)
 
@@ -12,7 +12,7 @@ Rust port of the libopus SILK-only float encoder for wasm32. Read `PORTING.md` b
 
 ## Layout
 
-- `src/silk`, `src/celt`, `src/opus`: one Rust module per C file, C names kept.
+- `src/silk`, `src/celt`, `src/opus`: one Rust module per C file.
 - `wasm/`: the `minisilk-wasm` cdylib with the `minisilk_*` exports; `wasm/build.rs` sets the shadow stack size.
 - `test/compare.ts` (Deno FFI) + `test/shim.c`: differential test against `third_party/opus`
   (submodule, libopus v1.6.1).
@@ -25,9 +25,8 @@ Rust port of the libopus SILK-only float encoder for wasm32. Read `PORTING.md` b
 
 ## Rules
 
-- Bit-exactness with scalar libopus is the test goal. Match C numeric precision exactly
-  (integer promotion, `f32` vs `f64`); never hand-vectorize plain C loops.
-- Where the fork has a WASM SIMD kernel, port it with `core::arch::wasm32`; add no scalar fallback.
+- Bit-exactness with scalar libopus is the test goal. How it is reached is free (hand-vectorized loops,
+  other types), as long as packets, final range and DTX state stay bit-exact.
+- The SIMD kernels come from the WASM SIMD fork and use `core::arch::wasm32`, with no scalar fallback.
   Relaxed SIMD uses `cfg(target_feature = "relaxed-simd")`.
-- Keep C function/field/constant names. Comment density follows the C comments that explain the algorithm.
 - `src/` is BSD-3 (libopus derivative); `test/audio` is GPL-2.0 and test-only.

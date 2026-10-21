@@ -2,7 +2,7 @@
 
 Two independent Rust ports of the libopus 1.6.1 float encoder for wasm32: `minisilk/` (SILK-only)
 and `minicelt/` (CELT-only). Each crate has its own `CLAUDE.md` (scope) and `PORTING.md`
-(translation rules, tests); read them before changing that crate.
+(configuration, trimming, tests); read them before changing that crate.
 
 ## Rules
 
@@ -15,8 +15,8 @@ and `minicelt/` (CELT-only). Each crate has its own `CLAUDE.md` (scope) and `POR
 - Porting is finished. Closeness to the C code is no longer a criterion, either for or against a change:
   idiomatic Rust rewrites (renamed/specialised functions, constants hardcoded for the only call site,
   restructured loops) are fine as long as output stays correct (bit-exact for minisilk, within tolerance
-  for minicelt). Judge changes by bounds checks, size, speed and test results. The translation rules in
-  each `PORTING.md` describe the porting phase.
+  for minicelt). Judge changes by bounds checks, size, speed and test results. Each `PORTING.md`
+  describes the fixed configuration, what was trimmed and why, the bounds-check conventions and the tests.
 
 ## Layout
 

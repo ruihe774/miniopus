@@ -1,10 +1,10 @@
-# minicelt porting guide
+# minicelt: configuration, trimming, tests
 
-minicelt is a mechanical Rust port of the libopus CELT-only float encoder
+minicelt is a Rust port of the libopus CELT-only float encoder
 (`OPUS_APPLICATION_RESTRICTED_CELT`), for wasm32 only. C source: the fork
 https://github.com/ruihe774/opus-wasm-simd, branch `v1.6.1-wasm-simd` (upstream
 libopus 1.6.1 plus WASM SIMD / relaxed SIMD kernels in `celt/wasm`; its scalar
-encoder code is identical to 1.6.1; not vendored here, fetch it to port). Do not
+encoder code is identical to 1.6.1; not vendored here, fetch it to consult). Do not
 use the fork's `wasm-simd` branch: it is based on post-1.6.1 upstream, whose
 scalar code behaves differently. The oracle for testing is natively built
 upstream libopus 1.6.1 (`third_party/opus`, scalar C), compared by tolerance
@@ -27,27 +27,26 @@ Tests.
 - Float path only (no `FIXED_POINT`), no `FLOAT_APPROX`, no `ENABLE_QEXT`,
   `ENABLE_DRED`, `ENABLE_PFA`, `CUSTOM_MODES`, `RESYNTH`, no LFE, no energy
   mask (surround), no `signalling` (Opus custom header), `start == 0`.
-- Where the fork has a WASM SIMD kernel (`celt/wasm`), port **that** kernel with
-  `core::arch::wasm32` and drop the scalar C version. Relaxed SIMD: C's
-  `#if defined(__wasm_relaxed_simd__)` becomes
-  `#[cfg(target_feature = "relaxed-simd")]`. Kernels that matter here:
-  `op_pvq_search_wasm` (vq_wasm.c), `celt_inner_prod_wasm`,
+- Where the fork has a WASM SIMD kernel (`celt/wasm`), the crate uses **that** kernel with
+  `core::arch::wasm32` and has no scalar version. Relaxed SIMD is
+  `#[cfg(target_feature = "relaxed-simd")]` (C's `#if defined(__wasm_relaxed_simd__)`). Kernels that
+  matter here: `op_pvq_search_wasm` (vq_wasm.c), `celt_inner_prod_wasm`,
   `dual_inner_prod_wasm`, `celt_pitch_xcorr_wasm` (with its `xcorr_kernel_wasm` part),
-  `comb_filter_const_wasm` (pitch_wasm.c). The MDCT, FFT and `bands.c` have no
-  kernels and are ported as plain scalar code.
+  `comb_filter_const_wasm` (pitch_wasm.c). The fork has no kernels for the MDCT, FFT and `bands.c`; they
+  are plain scalar code.
 - Everything that cannot matter in this configuration is removed (see
-  "Trimming" below), not ported: other modes or rates, CBR, QEXT, decoder-only
+  "Trimming" below): other modes or rates, CBR, QEXT, decoder-only
   `encode == 0` paths, state and parameters that are constant. Functions shared
   with the decoder lose their `encode` parameter (always 1). Where an assumption
   is not obvious from the code, a `debug_assert!` states it.
 
 ## Layout
 
-One Rust module per C file, with the C file name (`celt/quant_bands.c` →
+One Rust module per C file, named after it (`celt/quant_bands.c` →
 `src/celt/quant_bands.rs`, `src/opus_encoder.c` → `src/opus/encoder.rs`).
-Function, struct, field and constant names stay as in C (`quant_coarse_energy`,
-`st->prefilter_period`); the crate allows the naming lints. Header-only inlines
-go into the module of the matching `.c` file.
+Function, struct, field and constant names are mostly the C ones (`quant_coarse_energy`,
+`st.prefilter_period`); the crate allows the naming lints. Header-only inlines
+are in the module of the matching `.c` file.
 
 | C | Rust |
 |---|---|
@@ -63,7 +62,7 @@ go into the module of the matching `.c` file.
 | `opus_defines.h`, `opus_private.h` constants | `opus::defines` |
 | `stack_alloc.h` | `stack` |
 
-`CELTEncoder` keeps the C layout where it can; its trailing variable-size arrays (`in_mem`,
+`CELTEncoder`'s trailing variable-size arrays (`in_mem`,
 `prefilter_mem`, `oldBandE`, `oldLogE`, `oldLogE2`, `energyError`) are fixed
 arrays sized for two channels and indexed with the C per-channel strides
 (`c*overlap`, `c*COMBFILTER_MAXPERIOD`, `c*nbEBands`), so for stereo the
@@ -75,7 +74,7 @@ static encoder is in `.bss` and costs nothing in the `.wasm` file.
 The crate is trimmed to the fixed configuration: size (code and memory) is the main optimization,
 and git has what was removed. Rules for what to keep when changing it: delete what produces no
 difference (performance, numbers or bitstream) in the configuration, and check with the
-bit-exact comparison below. What was removed or specialized:
+packet-identity regression check below. What was removed or specialized:
 
 - Unreachable configurations: modes other than the 48 kHz/960 one (and their `CELTMode`
   struct, now constants; allocation, cache, twiddle and window tables of other frame sizes), LM
@@ -166,61 +165,19 @@ as the `coverage` job (log only, never fails the workflow, nothing uploaded). Th
 `compare.ts`'s, so a function it reports as never entered may still be reached by the test suite
 (`quant_band_n1`, for one, is not reached by the speech corpus).
 
-## Translation rules
+## Conventions
 
-- Types: `int`/`opus_int32` → `i32`, `unsigned`/`opus_uint32` → `u32`,
-  `opus_int16` → `i16`, `unsigned char` → `u8`, `signed char` → `i8`,
-  `opus_val16`/`opus_val32`/`celt_sig`/`celt_norm`/`celt_ener`/`celt_glog`/
-  `opus_res`/`celt_coef`/`float` → `f32`, `double` → `f64`.
-- **Float macros**: in the float build the fixed-point macros are identities or
-  plain operators. Write them out: `MULT16_32_Q15(a,b)` → `a*b`,
-  `MAC16_16(c,a,b)` → `c + a*b`, `SHR32(a,s)`/`SHL32`/`PSHR32`/`VSHR32`/
-  `EXTEND32`/`EXTRACT16`/`SATURATE*`/`ROUND16` → `a`, `QCONST16(x,b)`/
-  `QCONST32`/`GCONST(x)` → `x` (as an `f32` literal), `HALF32(x)` → `0.5*x`,
-  `ADD32`/`SUB32` → `+`/`-`, `DIV32_16(a,b)` → `a/b`. Keep the order of
-  operations exactly (`(c)+(a)*(b)`, left to right). Use the `arch` functions
-  for `MIN16`/`MAX16`/`MIN32`/`MAX32`/`MING`/`MAXG`/`FMIN`/`FMAX` (C ternary
-  semantics, *not* `f32::min`/`max`) and `IMIN`/`IMAX`.
-- **Integer promotion**: C computes `opus_int16`/`unsigned char` arithmetic in
-  `int`. Cast explicitly (`a as i32 * b as i32`). Watch unsigned arithmetic
-  (`opus_uint32`, `unsigned`): mixing `int` and `unsigned` converts to
-  `unsigned` in C.
-- **Float promotion**: C evaluates an expression in `double` as soon as one
-  operand is `double` (a `1.0` or `.5` literal without `f`, a `double`
-  variable, `floor()`, `log()`, `sqrt()`, `exp()`, `cos()`, ...). Reproduce the
-  exact precision of every operation with `as f64`/`as f32`; `int` operands
-  combined with `float` become `float`. Getting this wrong shows up as a
-  bit-exactness failure. libm functions: the `mathops` equivalents (see Trimming),
-  exactly the precision C calls.
-- Rust does not contract `a * b + c` into an FMA, and the reference is built
-  with `-ffp-contract=off`, so plain expressions match. Never hand-vectorize a
-  plain C loop to imitate compiler output.
-- C `(int)x` on a float truncates; Rust `x as i32` truncates and saturates.
-  `float2int` (`lrintf`) would be round half to even (`libm::rintf`); the encoder does not
-  use it.
-  `floor(.5+x)` stays exactly that.
-- Arrays: prefer slices (`&[f32]`, `&mut [i32]`), indexed plainly where the bounds are provable and
-  with `get_unchecked` behind a `debug_assert!` (unchecked in release, checked in the `checked` profile)
-  where they are not (see "Bounds checks" above).
-  Where C uses negative offsets or pointer arithmetic into a larger buffer,
-  pass the buffer plus an offset, or use raw pointers; `unsafe` is allowed anywhere. C argument
-  order is kept; `const T *` → `&[T]`, `T *` output → `&mut [T]` / `&mut T`.
-- `celt_assert`/`celt_sig_assert` → `debug_assert!`. Drop `arch` parameters.
-- Plain C arithmetic uses plain Rust operators, so `checked` builds trap on
-  integer overflow. Use `wrapping_*` exactly where C relies on wraparound
-  (unsigned arithmetic in `entenc`, `celt_lcg_rand`, ...) and say so.
-- `ALLOC` / `SAVE_STACK` / `RESTORE_STACK`:
-  ```rust
-  let st = stack::save();          // SAVE_STACK
-  let x = st.alloc::<i32>(n);      // ALLOC(x, n, opus_int32)
-  // RESTORE_STACK when st goes out of scope
-  ```
-  Allocated memory is not cleared, as in C. `ALLOC_NONE` → nothing. The pseudostack
-  (`GLOBAL_STACK_SIZE`) is sized to the measured peak: allocate in scopes that end as early as
-  possible (see Trimming) and re-measure after changes.
-- `celt_udiv`/`celt_sudiv`: `USE_SMALL_DIV_TABLE` is not defined (it is ARM
-  only), so they are plain `/`.
-- Keep the C comments that explain the algorithm; drop the boilerplate.
+- Numerics: correct output is what the tests decide (tolerance gate below), not the C types or operation
+  order. Rust does not contract `a * b + c` into an FMA and the reference is built with `-ffp-contract=off`,
+  so plain scalar expressions round like the reference. Hand-vectorized loops are fine: packets identical
+  to the previous code is the easy case, anything else must pass the gate. `x as i32` truncates and
+  saturates.
+- Assertions are `debug_assert!` (active in the `checked` profile).
+- Plain arithmetic uses plain Rust operators, so `checked` builds trap on integer overflow. Use `wrapping_*`
+  where wraparound is intended (unsigned arithmetic in `entenc`, `celt_lcg_rand`, ...) and say so.
+- Scratch memory: `let st = stack::save();` and `st.alloc::<i32>(n)` (freed when `st` goes out of scope; not
+  cleared). The pseudostack (`GLOBAL_STACK_SIZE`) is sized to the measured peak: allocate in scopes that
+  end as early as possible (see Trimming) and re-measure after changes.
 - No `std`, no `alloc` in non-test code.
 
 ## Tests

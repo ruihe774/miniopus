@@ -1,9 +1,9 @@
-# minisilk porting guide
+# minisilk: configuration, trimming, tests
 
-minisilk is a mechanical Rust port of the libopus SILK-only float encoder
+minisilk is a Rust port of the libopus SILK-only float encoder
 (`OPUS_APPLICATION_RESTRICTED_SILK`), for wasm32 only. C source: libopus 1.6.1
 plus a fork's WASM SIMD / relaxed SIMD kernels (https://github.com/ruihe774/opus-wasm-simd,
-branch `v1.6.1-wasm-simd`; not vendored here, fetch it to port). Do not use the fork's `wasm-simd`
+branch `v1.6.1-wasm-simd`; not vendored here, fetch it to consult). Do not use the fork's `wasm-simd`
 branch: it is based on post-1.6.1 upstream, whose scalar code behaves differently. The kernels are bit-exact with the scalar C, so the
 reference for testing is plain upstream libopus (`third_party/opus`), compared bit-exactly. Upstream's own
 SIMD builds are bit-exact with scalar for this configuration too (`scripts/variance.ts`: 0 differing runs
@@ -29,13 +29,13 @@ in about 4000 on aarch64 NEON and on x86-64 AVX2).
   mirror the C layout; nothing depends on field order or offsets.
 - Float path only (`silk/float`, no `FIXED_POINT`).
 - Where the fork has a WASM SIMD kernel (`silk/wasm`, `silk/float/wasm`,
-  `celt/wasm`), port **that** kernel with `core::arch::wasm32` and drop the
-  scalar C version. Relaxed SIMD: C's `#if defined(__wasm_relaxed_simd__)`
-  becomes `#[cfg(target_feature = "relaxed-simd")]`. Scalar fallbacks for
-  configurations we never use (e.g. `nStatesDelayedDecision > 4`) become a
+  `celt/wasm`), the crate uses **that** kernel with `core::arch::wasm32` and has no
+  scalar version. Relaxed SIMD is `#[cfg(target_feature = "relaxed-simd")]` (C's
+  `#if defined(__wasm_relaxed_simd__)`). Scalar fallbacks for
+  configurations we never use (e.g. `nStatesDelayedDecision > 4`) are a
   `debug_assert!`.
 - Branches that are unreachable under the fixed configuration (fs_kHz != 16,
-  nb_subfr == 2, stereo, LBRR, CBR) are removed, state included; leave a `debug_assert!` of
+  nb_subfr == 2, stereo, LBRR, CBR) are removed, state included, with a `debug_assert!` of
   the assumption where it is cheap. Size (code and memory) is the main optimization, so do not
   add them back "for completeness"; git has them.
 
@@ -50,13 +50,13 @@ configuration, and check with the bit-exact comparison (see Tests).
 
 ## Layout
 
-One Rust module per C file, with the C file name (`silk/NLSF_VQ.c` →
-`src/silk/NLSF_VQ.rs`). Function, struct, field and constant names stay as in C
-(`silk_NLSF_VQ`, `psEncC->sCmn.fs_kHz`); the crate allows the naming lints.
+One Rust module per C file, named after it (`silk/NLSF_VQ.c` →
+`src/silk/NLSF_VQ.rs`). Function, struct, field and constant names are mostly the C ones
+(`silk_NLSF_VQ`, `sCmn`); the crate allows the naming lints.
 
 | C | Rust |
 |---|---|
-| `silk/define.h`, `errors.h`, `tuning_parameters.h`, `pitch_est_defines.h` | `silk::{define, tuning_parameters, pitch_est_defines}` (ints are `i32`, `1.0f` → `f32`, `1.0` → `f64`) |
+| `silk/define.h`, `errors.h`, `tuning_parameters.h`, `pitch_est_defines.h` | `silk::{define, tuning_parameters, pitch_est_defines}` |
 | `SigProc_FIX.h` macros, `macros.h`, `Inlines.h` | `silk::macros` |
 | `SigProc_FLP.h` inlines, `float2int` | `silk::float::sigproc_flp` |
 | `structs.h`, `structs_FLP.h` | `silk::structs`, `silk::float::structs_flp` (trimmed, see above) |
@@ -64,55 +64,32 @@ One Rust module per C file, with the C file name (`silk/NLSF_VQ.c` →
 | `entcode.h` `ec_ctx` | `celt::entcode` |
 | `stack_alloc.h` | `stack` |
 
-## Translation rules
+## Conventions
 
-- Types: `opus_int`/`int`/`opus_int32` → `i32`, `opus_int16` → `i16`,
-  `opus_int8` → `i8`, `opus_uint8` → `u8`, `silk_float`/`float` → `f32`,
-  `double` → `f64`.
-- **Integer promotion**: C computes `opus_int16` arithmetic in `int`. Cast
-  explicitly (`a as i32 * b as i32`). The macros take `i32` arguments for that
-  reason.
-- **Float promotion**: C evaluates an expression in `double` as soon as one
-  operand is `double` (a `1.0` literal, a `double` variable, `log10()` etc.).
-  Reproduce the exact precision of every operation with `as f64`/`as f32`.
-  Getting this wrong shows up as a bit-exactness failure.
-- Rust does not contract `a * b + c` into an FMA, and the reference is built
-  with `-ffp-contract=off`, so plain expressions match. Never hand-vectorize a
-  plain C loop to imitate compiler output (with contraction on, clang fuses
-  multiply-adds in loops it auto-vectorizes under `-mrelaxed-simd`, which would
-  make the result depend on the optimizer).
-- C `(opus_int)x` on a float truncates; Rust `x as i32` truncates and saturates.
-  `silk_float2int`/`float2int` round half to even (`f32.nearest`).
-- Arrays: prefer slices (`&[i16]`, `&mut [f32]`), indexed with `macros::Ix` (`x.at(i)`,
-  `*x.at_mut(i) = v`, `x.rg(a..b)`, `x.rg_mut(a..b)`: unchecked in release, checked in the
-  `checked` profile, as minicelt's `arch::Ix`; fixed arrays work through method-call
-  auto-unsizing). New code should use it and run the `checked` tests. Plain `x[i]` stays where
-  the index is a compile-time-bounded loop variable or constant (the compiler already drops the
-  check) and in the SIMD tails that use raw pointers. For 2D arrays only the innermost index
-  goes through `Ix` (`*m[j].at_mut(i)`), since `m.at(j)` would copy the row. Where C uses
-  negative offsets or pointer arithmetic into a larger buffer, pass the buffer plus an offset,
-  or use raw pointers; `unsafe` is allowed anywhere.
-- Bounds checks: indexing with run-time indices goes through `macros::Ix` (the trait lives in
-  `silk::macros`, which every module already imports; minisilk has no `arch` module), unchecked
-  like C in release and checked in the `checked` profile (debug assertions). Converting the
-  files with run-time-indexed slices (`NSQ`, `NSQ_del_dec`, `noise_shape_analysis_FLP`,
-  `pitch_analysis_core_FLP`, `burg_modified_FLP`, `NLSF_del_dec_quant`, `encode_pulses`,
-  `wrappers_FLP`, `NLSF2A`, `A2NLSF`, `corrMatrix_FLP`) drops panic sites from the release wasm.
-  Files whose loops have constant bounds (`VAD`, `encode_frame_FLP`) gain nothing and use plain
-  indexing. New code should use it, and run the `checked` tests.
-- `silk_assert`/`celt_assert` → `debug_assert!`. Drop `arch` parameters.
-- Plain C arithmetic uses plain Rust operators, so debug builds trap on
-  overflow. Use the `_ovflw` macros / `wrapping_*` exactly where C does. If C
-  overflows (in practice wraps) in normal operation, use `wrapping_*` and say
-  so in a comment.
-- `ALLOC` / `SAVE_STACK` / `RESTORE_STACK`:
-  ```rust
-  let st = stack::save();          // SAVE_STACK
-  let x = st.alloc::<i32>(n);      // ALLOC(x, n, opus_int32)
-  // RESTORE_STACK when st goes out of scope
-  ```
-  Allocated memory is not cleared, as in C.
-- Keep the C comments that explain the algorithm; drop the boilerplate.
+- Numerics: bit-exactness with the scalar oracle is the only criterion, so types and the order and
+  precision of float operations matter only through it. Rust does not contract `a * b + c` into an FMA
+  and the reference is built with `-ffp-contract=off`, so plain scalar expressions match (with
+  contraction on, clang fuses multiply-adds in loops it auto-vectorizes under `-mrelaxed-simd`, which
+  would make the reference depend on the optimizer). Hand-vectorized loops are fine as long as the output
+  stays bit-exact. `x as i32` truncates and saturates; `silk_float2int`/`float2int` round half to even
+  (`f32.nearest`).
+- Bounds checks: indexing with run-time indices goes through `macros::Ix` (`x.at(i)`, `*x.at_mut(i) = v`,
+  `x.rg(a..b)`, `x.rg_mut(a..b)`; the trait lives in `silk::macros`, which every module already imports;
+  minisilk has no `arch` module): unchecked in release, checked in the `checked` profile (debug
+  assertions). Fixed arrays work through method-call auto-unsizing. Plain `x[i]` stays where the index is
+  a compile-time-bounded loop variable or constant (the compiler already drops the check) and in the SIMD
+  tails that use raw pointers. For 2D arrays only the innermost index goes through `Ix`
+  (`*m[j].at_mut(i)`), since `m.at(j)` would copy the row. Files with run-time-indexed slices (`NSQ`,
+  `NSQ_del_dec`, `noise_shape_analysis_FLP`, `pitch_analysis_core_FLP`, `burg_modified_FLP`,
+  `NLSF_del_dec_quant`, `encode_pulses`, `wrappers_FLP`, `NLSF2A`, `A2NLSF`, `corrMatrix_FLP`) use it,
+  which drops panic sites from the release wasm; files whose loops have constant bounds (`VAD`,
+  `encode_frame_FLP`) gain nothing and use plain indexing. New code should follow the same split, and run
+  the `checked` tests. `unsafe` is allowed anywhere.
+- Assertions are `debug_assert!` (active in the `checked` profile).
+- Plain arithmetic uses plain Rust operators, so debug builds trap on overflow. Where the algorithm
+  relies on wraparound, use the `_ovflw` macros / `wrapping_*` and say so in a comment.
+- Scratch memory: `let st = stack::save();` and `st.alloc::<i32>(n)` (freed when `st` goes out of scope;
+  not cleared).
 - No `std`, no `alloc` in non-test code.
 
 ## Memory

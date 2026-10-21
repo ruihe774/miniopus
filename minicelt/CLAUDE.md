@@ -1,7 +1,7 @@
 # minicelt
 
 Rust port of the libopus CELT-only float encoder for wasm32. Read `PORTING.md` before changing
-`src/`; it holds the translation rules and test details.
+`src/`; it holds the configuration, trimming and test details.
 
 ## Scope (fixed, do not widen without asking)
 
@@ -16,7 +16,7 @@ Rust port of the libopus CELT-only float encoder for wasm32. Read `PORTING.md` b
 
 ## Layout
 
-- `src/celt`, `src/opus`: one Rust module per C file, C names kept.
+- `src/celt`, `src/opus`: one Rust module per C file.
 - `wasm/`: the `minicelt-wasm` cdylib with the `minicelt_*` exports.
 - `test/compare.ts` (Deno) + `test/shim.c` + `test/analysis_stub.c`: differential test against native
   `third_party/opus` (scalar C as the oracle, by tolerance). `scripts/gen_tables.py` generates
@@ -35,12 +35,11 @@ Rust port of the libopus CELT-only float encoder for wasm32. Read `PORTING.md` b
 
 - The test goal is the tolerance gate against upstream libopus 1.6.1 scalar C (see `PORTING.md`): the
   SIMD kernels sum in lane order, so packets are not bit-exact with scalar, but their effects must stay
-  within the gate. Match C numeric precision exactly (integer promotion, `f32` vs `f64`); never
-  hand-vectorize plain C loops.
-- Where the WASM SIMD fork (https://github.com/ruihe774/opus-wasm-simd, branch `v1.6.1-wasm-simd`) has
-  a kernel, port it with `core::arch::wasm32`; add no scalar fallback.
+  within the gate. How that is reached is free (hand-vectorized loops, other types or precision): a change
+  that keeps the packets identical to the previous code is the easy case, any other must pass the gate.
+- The SIMD kernels come from the WASM SIMD fork (https://github.com/ruihe774/opus-wasm-simd, branch
+  `v1.6.1-wasm-simd`) and use `core::arch::wasm32`, with no scalar fallback.
   Relaxed SIMD uses `cfg(target_feature = "relaxed-simd")`.
 - Bounds checks: plain indexing where provable, inline `get_unchecked` behind a `debug_assert!` only for the `IX-HARD` sites (PORTING.md
   "Bounds checks"); no check added in a per-sample loop, and bench encode time (`test/bench.ts`).
-- Keep C function/field/constant names. Comment density follows the C comments that explain the algorithm.
 - `src/` is BSD-3 (libopus derivative).
