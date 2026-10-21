@@ -14,6 +14,7 @@ use super::laplace::ec_laplace_encode;
 use super::mathops::{floor64, log2};
 use super::modes;
 use super::rate::MAX_FINE_BITS;
+use crate::celt::mathops::{fmax, fmin, imax, imin};
 use crate::stack;
 
 /// Mean energy in each band quantized in Q4 and converted back to float
@@ -69,7 +70,7 @@ pub fn loss_distortion(
             dist = dist + d * d;
         }
     }
-    200.0f32.min(dist)
+    fmin(200.0, dist)
 }
 
 fn quant_coarse_energy_impl(
@@ -108,11 +109,11 @@ fn quant_coarse_energy_impl(
         loop {
             let k = (i + c * modes::nbEBands) as usize;
             let x = eBands[k];
-            let oldE = (-9.0f32).max(oldEBands[k]);
+            let oldE = fmax(-9.0, oldEBands[k]);
             let f = x - coef * oldE - prev[c as usize & 1];
             /* Rounding to nearest integer here is really important! */
             let mut qi = floor64((0.5f32 + f) as f64) as i32;
-            let decay_bound = (-28.0f32).max(oldEBands[k]) - max_decay;
+            let decay_bound = fmax(-28.0, oldEBands[k]) - max_decay;
             /* Prevent the energy from going down too quickly (e.g. for bands
             that have just one bin) */
             if qi < 0 && x < decay_bound {
@@ -128,10 +129,10 @@ fn quant_coarse_energy_impl(
             let bits_left = budget - tell - 3 * C * (end - i);
             if i != start && bits_left < 30 {
                 if bits_left < 24 {
-                    qi = 1i32.min(qi);
+                    qi = imin(1, qi);
                 }
                 if bits_left < 16 {
-                    qi = (-1i32).max(qi);
+                    qi = imax(-1, qi);
                 }
             }
             if budget - tell >= 15 {
@@ -143,10 +144,10 @@ fn quant_coarse_energy_impl(
                     (prob_model[pi + 1] as i32) << 6,
                 );
             } else if budget - tell >= 2 {
-                qi = (-1i32).max(qi.min(1));
+                qi = imax(-1, imin(qi, 1));
                 ec_enc_icdf(enc, (2 * qi) ^ -((qi < 0) as i32), &small_energy_icdf, 2);
             } else if budget - tell >= 1 {
-                qi = 0i32.min(qi);
+                qi = imin(0, qi);
                 ec_enc_bit_logp(enc, -qi, 1);
             } else {
                 qi = -1;
@@ -200,7 +201,7 @@ pub fn quant_coarse_energy(
 
     let mut max_decay: f32 = 16.0;
     if end - start > 10 {
-        max_decay = max_decay.min(0.125f32 * nbAvailableBytes as f32);
+        max_decay = fmin(max_decay, 0.125f32 * nbAvailableBytes as f32);
     }
     let enc_start_state: ec_enc = *enc;
 

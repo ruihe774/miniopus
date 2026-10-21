@@ -44,6 +44,7 @@ use crate::celt::celt_encoder::{CELTEncoder, celt_encode_with_ec, celt_encoder_i
 use crate::celt::entcode::{ec_enc, ec_tell};
 use crate::celt::entenc::ec_enc_init;
 use crate::celt::mathops::{VERY_SMALL, maxabs};
+use crate::celt::mathops::{imax, imin};
 use crate::celt::modes;
 use crate::celt::pitch::celt_inner_prod;
 use crate::opus::defines::*;
@@ -83,7 +84,7 @@ const stereo_threshold: i32 = 17000 + ((48 * 48 * (19000 - 17000)) >> 14);
 /// TOC byte of a 20 ms CELT-only frame (the OPUS_BANDWIDTH_* value maps to the CELT bandwidth
 /// field, mediumband and narrowband both to 0).
 fn celt_toc(bandwidth: i32, channels: i32) -> u8 {
-    let tmp = (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND).max(0);
+    let tmp = imax(bandwidth - OPUS_BANDWIDTH_MEDIUMBAND, 0);
     (0x80 | tmp << 5 | 3 << 3 | ((channels == 2) as i32) << 2) as u8
 }
 
@@ -332,7 +333,7 @@ impl OpusEncoder {
         } else {
             self.user_bitrate_bps
         };
-        let bitrate_bps = user_bitrate.min(PACKET_SIZE_CAP as i32 * 8 * 50);
+        let bitrate_bps = imin(user_bitrate, PACKET_SIZE_CAP as i32 * 8 * 50);
 
         /* max_data_bytes (1276) >= 3 and the frame rate is 50 */
         if bitrate_bps < 3 * 50 * 8 {

@@ -1,6 +1,7 @@
 //! Port of celt/pitch.c and the float kernels of celt/wasm/pitch_wasm.c
 //! (opus_val16 = opus_val32 = f32).
 
+use crate::celt::mathops::{fmax, imax};
 use core::arch::wasm32::*;
 
 use super::celt_lpc::{_celt_autocorr, _celt_lpc};
@@ -49,7 +50,7 @@ fn wasm_f32x4_hsum(a: v128) -> f32 {
 }
 
 pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
-    let n = N.max(0) as usize;
+    let n = imax(N, 0) as usize;
     debug_assert!(x.len() >= n && y.len() >= n);
     let (px, py) = (x.as_ptr(), y.as_ptr());
     // SAFETY: every vector load reads 4 floats at an index i with i + 4 <= n.
@@ -105,7 +106,7 @@ unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
 /// `xcorr[i] = sum_j _x[j] * _y[i + j]` for i in 0..max_pitch. Reads `_y[0..len + max_pitch - 1]`.
 pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max_pitch: i32) {
     debug_assert!(max_pitch > 0);
-    let (len, max_pitch) = (len.max(0) as usize, max_pitch.max(0) as usize);
+    let (len, max_pitch) = (imax(len, 0) as usize, imax(max_pitch, 0) as usize);
     let xcorr = &mut xcorr[..max_pitch];
     debug_assert!(_x.len() >= len);
     debug_assert!(_y.len() + 1 >= len + max_pitch);
@@ -165,7 +166,7 @@ pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max
 
 /// `dual_inner_prod_wasm`: `*xy1 = sum x[i]*y01[i]`, `*xy2 = sum x[i]*y02[i]`, i in 0..N.
 pub fn dual_inner_prod(x: &[f32], y01: &[f32], y02: &[f32], N: i32, xy1: &mut f32, xy2: &mut f32) {
-    let n = N.max(0) as usize;
+    let n = imax(N, 0) as usize;
     debug_assert!(x.len() >= n && y01.len() >= n && y02.len() >= n);
     let (px, p1, p2) = (x.as_ptr(), y01.as_ptr(), y02.as_ptr());
     // SAFETY: every vector load reads 4 floats at an index i with i + 4 <= n.
@@ -302,7 +303,7 @@ fn find_best_pitch(xcorr: &[f32], y: &[f32], len: i32, max_pitch: i32, best_pitc
             }
         }
         Syy += y[i + len] * y[i + len] - y[i] * y[i];
-        Syy = 1.0f32.max(Syy);
+        Syy = fmax(1.0, Syy);
     }
 }
 
@@ -425,7 +426,7 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
             continue;
         }
         let sum = celt_inner_prod(x_lp, &y[i as usize..], len >> 1);
-        *xc = (-1.0f32).max(sum);
+        *xc = fmax(-1.0, sum);
     }
     find_best_pitch(xcorr, y, len >> 1, max_pitch >> 1, &mut best_pitch);
 
@@ -496,7 +497,7 @@ pub fn remove_doubling(
     let xw = &x[..base + nn];
     for i in 1..=base {
         yy = yy + xw[base - i] * xw[base - i] - xw[base + nn - i] * xw[base + nn - i];
-        yy_lookup[i] = 0.0f32.max(yy);
+        yy_lookup[i] = fmax(0.0, yy);
     }
     yy = yy_lookup[T0 as usize];
     let mut best_xy = xy;
@@ -539,13 +540,13 @@ pub fn remove_doubling(
         } else {
             cont = 0.0;
         }
-        let mut thresh = 0.3f32.max(0.7 * g0 - cont);
+        let mut thresh = fmax(0.3, 0.7 * g0 - cont);
         /* Bias against very high pitch (very short period) to avoid false-positives
         due to short-term correlation */
         if T1 < 3 * minperiod {
-            thresh = 0.4f32.max(0.85 * g0 - cont);
+            thresh = fmax(0.4, 0.85 * g0 - cont);
         } else if T1 < 2 * minperiod {
-            thresh = 0.5f32.max(0.9 * g0 - cont);
+            thresh = fmax(0.5, 0.9 * g0 - cont);
         }
         if g1 > thresh {
             best_xy = xy;
@@ -554,7 +555,7 @@ pub fn remove_doubling(
             g = g1;
         }
     }
-    best_xy = 0.0f32.max(best_xy);
+    best_xy = fmax(0.0, best_xy);
     let mut pg: f32;
     if best_yy <= best_xy {
         pg = 1.0;

@@ -3,6 +3,7 @@
 use super::mathops::COEF_ONE;
 use super::modes;
 use super::pitch::comb_filter_const;
+use crate::celt::mathops::imax;
 
 pub static trim_icdf: [u8; 11] = [126, 124, 119, 109, 87, 41, 19, 9, 4, 2, 0];
 /* Probs: NONE: 21.875%, LIGHT: 6.25%, NORMAL: 65.625%, AGGRESSIVE: 6.25% */
@@ -49,8 +50,8 @@ pub unsafe fn comb_filter(
         }
         /* When the gain is zero, T0 and/or T1 is set to zero. We need
         to have then be at least 2 to avoid processing garbage data. */
-        T0 = T0.max(COMBFILTER_MINPERIOD);
-        T1 = T1.max(COMBFILTER_MINPERIOD);
+        T0 = imax(T0, COMBFILTER_MINPERIOD);
+        T1 = imax(T1, COMBFILTER_MINPERIOD);
         let [t00, t01, t02] = gains[tapset0 as usize];
         let [t10, t11, t12] = gains[tapset1 as usize];
         let (g00, g01, g02) = (g0 * t00, g0 * t01, g0 * t02);

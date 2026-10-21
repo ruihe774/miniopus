@@ -2,6 +2,7 @@
 
 use super::entcode::ec_enc;
 use super::entenc::ec_encode_bin;
+use crate::celt::mathops::imin;
 
 /* The minimum probability of an energy delta (out of 32768). */
 const LAPLACE_LOG_MINP: i32 = 0;
@@ -40,7 +41,7 @@ pub fn ec_laplace_encode(enc: &mut ec_enc, value: &mut i32, mut fs: u32, decay: 
             let mut ndi_max =
                 (32768u32.wrapping_sub(fl) + LAPLACE_MINP - 1) as i32 >> LAPLACE_LOG_MINP;
             ndi_max = (ndi_max - s) >> 1;
-            let di = (val - i).min(ndi_max - 1);
+            let di = imin(val - i, ndi_max - 1);
             /* int added to unsigned */
             fl = fl.wrapping_add(((2 * di + 1 + s) * LAPLACE_MINP as i32) as u32);
             /* IMIN(int, unsigned) compares as unsigned */

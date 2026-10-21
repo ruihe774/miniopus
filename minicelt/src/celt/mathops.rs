@@ -9,6 +9,24 @@ pub const COEF_ONE: f32 = 1.0;
 pub const EPSILON: f32 = 1e-15;
 pub const VERY_SMALL: f32 = 1e-30;
 
+/// C `a < b ? a : b` and `a > b ? a : b`; `f32::min`/`max` differ for NaN and compile to a helper call.
+#[inline(always)]
+pub fn fmin(a: f32, b: f32) -> f32 {
+    if a < b { a } else { b }
+}
+#[inline(always)]
+pub fn fmax(a: f32, b: f32) -> f32 {
+    if a > b { a } else { b }
+}
+#[inline(always)]
+pub fn imin(a: i32, b: i32) -> i32 {
+    if a < b { a } else { b }
+}
+#[inline(always)]
+pub fn imax(a: i32, b: i32) -> i32 {
+    if a > b { a } else { b }
+}
+
 /// `sqrt(x)` (double): the single wasm instruction (correctly rounded, like libm's).
 #[inline(always)]
 pub fn sqrt64(x: f64) -> f64 {
@@ -29,10 +47,10 @@ pub fn maxabs(x: &[f32]) -> f32 {
     let mut maxval: f32 = 0.0;
     let mut minval: f32 = 0.0;
     for &v in x {
-        maxval = maxval.max(v);
-        minval = minval.min(v);
+        maxval = fmax(maxval, v);
+        minval = fmin(minval, v);
     }
-    maxval.max(-minval)
+    fmax(maxval, -minval)
 }
 
 /// Calculates the arctangent of x using a Remez approximation of order 15,
