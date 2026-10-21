@@ -4,7 +4,7 @@
 use core::arch::wasm32::*;
 
 use super::celt_lpc::{_celt_autocorr, _celt_lpc};
-use super::mathops::celt_sqrt;
+use super::mathops::sqrt;
 use crate::stack;
 
 /* Multiply-add a*b+c. With relaxed SIMD this may be fused (single rounding),
@@ -448,7 +448,7 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
 }
 
 fn compute_pitch_gain(xy: f32, xx: f32, yy: f32) -> f32 {
-    xy / celt_sqrt(1.0 + xx * yy)
+    xy / sqrt(1.0 + xx * yy)
 }
 
 static second_check: [i32; 16] = [0, 0, 3, 2, 3, 2, 5, 2, 3, 2, 3, 2, 5, 2, 3, 2];

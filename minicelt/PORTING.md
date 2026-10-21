@@ -98,9 +98,9 @@ bit-exact comparison below. What was removed or specialized:
   `scripts/gen_tables.py` checks that the rules reproduce libopus' tables bit for bit. The MDCT twiddles and the
   window are not derivable bit-exactly (the C tables are not correctly rounded libm values) and stay.
 - libm (no longer a dependency): `sqrt` and `floor` are the wasm instructions (`mathops::sqrt64`,
-  `mathops::floor64`); `celt_cos_norm` is the part of libm's `cos` that its angles reach, `acos64`
-  libm's `acos` with the hardware `sqrt`, `celt_log2` libm's `log` for positive normal `f32` (reduced
-  on the `f32` bits) and `celt_exp2` libm's `exp` for `0 <= x <= 4` (no special cases, no `scalbn`).
+  `mathops::floor64`); `mathops::cos_norm` is the part of libm's `cos` that its angles reach, `acos64`
+  libm's `acos` with the hardware `sqrt`, `mathops::log2` libm's `log` for positive normal `f32` (reduced
+  on the `f32` bits) and `mathops::exp2` libm's `exp` for `0 <= x <= 4` (no special cases, no `scalbn`).
   All four are bit for bit equal to `libm`'s, checked exhaustively over the inputs they can see.
 - Bounds checks: where the compiler can be given a proof (constant indices into fixed arrays, masks,
   `match` on a bounded value, iterators, `chunks_exact`, a re-slice hoisted out of the loop) the code uses

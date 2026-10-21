@@ -11,7 +11,7 @@
 use super::entcode::{ec_enc, ec_get_buffer, ec_range_bytes, ec_tell, ec_tell_frac};
 use super::entenc::{ec_enc_bit_logp, ec_enc_bits, ec_enc_icdf};
 use super::laplace::ec_laplace_encode;
-use super::mathops::celt_log2_db;
+use super::mathops::{floor64, log2};
 use super::modes;
 use super::rate::MAX_FINE_BITS;
 use crate::stack;
@@ -111,7 +111,7 @@ fn quant_coarse_energy_impl(
             let oldE = (-9.0f32).max(oldEBands[k]);
             let f = x - coef * oldE - prev[c as usize & 1];
             /* Rounding to nearest integer here is really important! */
-            let mut qi = crate::celt::mathops::floor64((0.5f32 + f) as f64) as i32;
+            let mut qi = floor64((0.5f32 + f) as f64) as i32;
             let decay_bound = (-28.0f32).max(oldEBands[k]) - max_decay;
             /* Prevent the energy from going down too quickly (e.g. for bands
             that have just one bin) */
@@ -308,9 +308,8 @@ pub fn quant_fine_energy(
         }
         for c in 0..C {
             let k = (i + c * modes::nbEBands) as usize;
-            let mut q2 = crate::celt::mathops::floor64(
-                ((error[k] * (1 << prev) as f32 + 0.5f32) * extra as f32) as f64,
-            ) as i32;
+            let mut q2 =
+                floor64(((error[k] * (1 << prev) as f32 + 0.5f32) * extra as f32) as f64) as i32;
             if q2 > extra - 1 {
                 q2 = extra - 1;
             }
@@ -371,7 +370,7 @@ pub fn amp2Log2(end: i32, bandE: &[f32], bandLogE: &mut [f32], C: i32) {
         let out = &mut bandLogE[base..base + end as usize];
         let e = &bandE[base..base + end as usize];
         for ((o, &b), &mean) in out.iter_mut().zip(e).zip(&eMeans[..end as usize]) {
-            *o = celt_log2_db(b) - mean;
+            *o = log2(b) - mean;
         }
     }
 }

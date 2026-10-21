@@ -13,7 +13,7 @@ use super::entenc::{
     ec_enc_bit_logp, ec_enc_bits, ec_enc_done, ec_enc_icdf, ec_enc_shrink, ec_enc_uint,
 };
 use super::mathops::{
-    CELT_SIG_SCALE, EPSILON, PI, celt_exp2_db, celt_log2, celt_maxabs_res, celt_rcp,
+    CELT_SIG_SCALE, EPSILON, PI, acos64, exp2, floor64, log2, maxabs, rcp, sqrt64,
 };
 use super::mdct::clt_mdct_forward;
 use super::modes;
@@ -257,7 +257,7 @@ pub fn transient_analysis(
         /* As a compromise with the old transient detector, frame energy is the
         geometric mean of the energy and half the max */
         /* `mean * maxE*.5*len2`: float product, then double (.5 is a double literal) */
-        mean = crate::celt::mathops::sqrt64((mean * maxE) as f64 * 0.5 * len2 as f64) as f32;
+        mean = sqrt64((mean * maxE) as f64 * 0.5 * len2 as f64) as f32;
         /* Inverse of the mean energy in Q15+6 */
         let norm: f32 = len2 as f32 / (EPSILON + mean);
         /* Compute harmonic mean discarding the unreliable boundaries
@@ -273,7 +273,7 @@ pub fn transient_analysis(
         for q in tmp[12..LEN2 - 4].chunks_exact(4) {
             /* Do not round to nearest. floor() is a double operation; the clamp to 0..127 (MIN32/MAX32 in
             C) is done on the saturating integer conversion (also maps NaN to 0 like C's `(int)NaN` here) */
-            let v: f64 = crate::celt::mathops::floor64((64.0 * norm * (q[0] + EPSILON)) as f64);
+            let v: f64 = floor64((64.0 * norm * (q[0] + EPSILON)) as f64);
             let id = (v as usize).min(127);
             unmask += inv_table[id] as i32;
         }
@@ -293,13 +293,12 @@ pub fn transient_analysis(
     }
     /* ("weak transients" only exist with allow_weak_transients, hybrid mode) */
     /* Arbitrary metric for VBR boost */
-    let tf_max: f32 =
-        0.0f32.max(crate::celt::mathops::sqrt64((27 * mask_metric) as f64) as f32 - 42.0);
+    let tf_max: f32 = 0.0f32.max(sqrt64((27 * mask_metric) as f64) as f32 - 42.0);
     /* *tf_estimate = 1 + IMIN(1, sqrt(IMAX(0, tf_max-30))/20); */
     /* QCONST32(0.139,28) is a double literal, so the subtraction and MAX32 are in double. */
     let d: f64 = (0.0069f32 * 163.0f32.min(tf_max)) as f64 - 0.139;
     let d = if 0.0 > d { 0.0 } else { d };
-    *tf_estimate = crate::celt::mathops::sqrt64(d) as f32;
+    *tf_estimate = sqrt64(d) as f32;
     is_transient
 }
 
@@ -699,9 +698,9 @@ pub fn alloc_trim_analysis(
         }
         minXC = 1.0f32.min(minXC.abs());
         /* mid-side savings estimations based on the LF average*/
-        let logXC = celt_log2(1.001 - sum * sum);
+        let logXC = log2(1.001 - sum * sum);
         /* mid-side savings estimations based on min correlation */
-        let logXC2 = (0.5 * logXC).max(celt_log2(1.001 - minXC * minXC));
+        let logXC2 = (0.5 * logXC).max(log2(1.001 - minXC * minXC));
 
         trim += (-4.0f32).max(0.75 * logXC);
         *stereo_saving = (*stereo_saving + 0.25).min(-(0.5 * logXC2));
@@ -721,7 +720,7 @@ pub fn alloc_trim_analysis(
     trim -= 2.0 * tf_estimate;
     /* (analysis->valid is always 0; surround_trim is always 0) */
 
-    let trim_index = crate::celt::mathops::floor64((0.5f32 + trim) as f64) as i32;
+    let trim_index = floor64((0.5f32 + trim) as f64) as i32;
     0i32.max(10i32.min(trim_index))
 }
 
@@ -893,8 +892,7 @@ pub fn dynalloc_analysis(
             /* Compute SMR: Mask is never more than 72 dB below the peak and never below the noise floor.*/
             let smr: f32 = s - (0.0f32.max(maxDepth - 12.0)).max(m);
             /* Clamp SMR to make sure we're not shifting by something negative or too large. */
-            let shift: i32 =
-                5i32.min(0i32.max(-(crate::celt::mathops::floor64((0.5f32 + smr) as f64) as i32)));
+            let shift: i32 = 5i32.min(0i32.max(-(floor64((0.5f32 + smr) as f64) as i32)));
             *sw = 32 >> shift;
         }
     }
@@ -962,8 +960,7 @@ pub fn dynalloc_analysis(
             *v = (*v).max(0.0);
         }
         for (imp, &v) in importance[start..endu].iter_mut().zip(&f0[start..]) {
-            *imp = crate::celt::mathops::floor64((0.5f32 + 13.0 * celt_exp2_db(v.min(4.0))) as f64)
-                as i32;
+            *imp = floor64((0.5f32 + 13.0 * exp2(v.min(4.0))) as f64) as i32;
         }
         /* For non-transient CBR/CVBR frames, halve the dynalloc contribution */
         if constrained_vbr != 0 && isTransient == 0 {
@@ -982,8 +979,7 @@ pub fn dynalloc_analysis(
         /* Compensate for Opus' under-allocation on tones. */
         if toneishness > 0.98 {
             /* `.5 + tone_freq*120/M_PI`: float product, then double */
-            let freq_bin: i32 =
-                crate::celt::mathops::floor64(0.5 + (tone_freq * 120.0) as f64 / PI) as i32;
+            let freq_bin: i32 = floor64(0.5 + (tone_freq * 120.0) as f64 / PI) as i32;
             for i in start..endu {
                 let (lo, hi) = (eBands[i] as i32, eBands[i + 1] as i32);
                 if freq_bin >= lo && freq_bin <= hi {
@@ -1153,7 +1149,7 @@ pub fn tone_detect(in_: &[f32], CC: i32, N: i32, toneishness: &mut f32) -> f32 {
     if fail == 0 && (lpc[0] * lpc[0]) as f64 + 3.999999 * (lpc[1] as f64) < 0.0 {
         /* Squared radius of the poles. */
         *toneishness = -lpc[1];
-        freq = (crate::celt::mathops::acos64((0.5f32 * lpc[0]) as f64) / delay as f64) as f32;
+        freq = (acos64((0.5f32 * lpc[0]) as f64) / delay as f64) as f32;
     } else {
         freq = -1.0;
         *toneishness = 0.0;
@@ -1217,10 +1213,8 @@ pub fn run_prefilter(
         }
         if tone_freq > 0.006148 {
             /* `.5+2.f*M_PI*multiple/tone_freq` is evaluated in double */
-            pitch_index =
-                (crate::celt::mathops::floor64(0.5 + 2.0 * PI * multiple as f64 / tone_freq as f64)
-                    as i32)
-                    .min(COMBFILTER_MAXPERIOD - 2);
+            pitch_index = (floor64(0.5 + 2.0 * PI * multiple as f64 / tone_freq as f64) as i32)
+                .min(COMBFILTER_MAXPERIOD - 2);
         } else {
             /* If the pitch is too low, using a very high pitch will actually give us an improvement
             due to the DC component of the filter that will be close to our tone. Again, not ideal,
@@ -1321,7 +1315,7 @@ pub fn run_prefilter(
             gain1 = st.prefilter_gain;
         }
 
-        let q = crate::celt::mathops::floor64((0.5f32 + gain1 * 32.0 / 3.0) as f64) as i32 - 1;
+        let q = floor64((0.5f32 + gain1 * 32.0 / 3.0) as f64) as i32 - 1;
         qg = 0i32.max(7i32.min(q));
         gain1 = 0.09375 * (qg + 1) as f32;
         pf_on = 1;
@@ -1618,8 +1612,8 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
         pcm.copy_from_slice(&buf[..ccu * Nu]);
         let in_ = &mut *buf;
 
-        let mut sample_max: f32 = st.overlap_max.max(celt_maxabs_res(pcm, C * (N - overlap)));
-        st.overlap_max = celt_maxabs_res(&pcm[cu * (Nu - ovu)..], C * overlap);
+        let mut sample_max: f32 = st.overlap_max.max(maxabs(pcm, C * (N - overlap)));
+        st.overlap_max = maxabs(&pcm[cu * (Nu - ovu)..], C * overlap);
         sample_max = sample_max.max(st.overlap_max);
         silence = (sample_max <= 1.0f32 / (1i32 << st.lsb_depth) as f32) as i32;
         /* tell == 1 */
@@ -2063,7 +2057,7 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
 
         if st.vbr_count < 970 {
             st.vbr_count += 1;
-            alpha = celt_rcp((st.vbr_count + 20) as f32);
+            alpha = rcp((st.vbr_count + 20) as f32);
         } else {
             alpha = 0.001;
         }

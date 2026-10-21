@@ -43,7 +43,7 @@
 use crate::celt::celt_encoder::{CELTEncoder, celt_encode_with_ec, celt_encoder_init};
 use crate::celt::entcode::{ec_enc, ec_tell};
 use crate::celt::entenc::ec_enc_init;
-use crate::celt::mathops::celt_maxabs_res;
+use crate::celt::mathops::{VERY_SMALL, maxabs};
 use crate::celt::modes;
 use crate::celt::pitch::celt_inner_prod;
 use crate::opus::defines::*;
@@ -122,8 +122,8 @@ fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
             let (x0, x1) = (f[0], f[1]);
             let out0 = x0 - m0;
             let out1 = x1 - m2;
-            m0 = coef * x0 + crate::celt::mathops::VERY_SMALL + coef2 * m0;
-            m2 = coef * x1 + crate::celt::mathops::VERY_SMALL + coef2 * m2;
+            m0 = coef * x0 + VERY_SMALL + coef2 * m0;
+            m2 = coef * x1 + VERY_SMALL + coef2 * m2;
             f[0] = out0;
             f[1] = out1;
         }
@@ -134,7 +134,7 @@ fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
         for v in &mut buf[..FRAME_SIZE as usize] {
             let x = *v;
             let y = x - m0;
-            m0 = coef * x + crate::celt::mathops::VERY_SMALL + coef2 * m0;
+            m0 = coef * x + VERY_SMALL + coef2 * m0;
             *v = y;
         }
         hp_mem[0] = m0;
@@ -320,7 +320,7 @@ impl OpusEncoder {
         /* "Cannot encode 100 ms in 1 byte" does not apply to 20 ms frames. */
 
         let is_silence =
-            celt_maxabs_res(pcm, FRAME_SIZE * self.channels) <= 1.0f32 / (1i32 << lsb_depth) as f32;
+            maxabs(pcm, FRAME_SIZE * self.channels) <= 1.0f32 / (1i32 << lsb_depth) as f32;
         /* analysis_info.valid = 0: run_analysis() (complexity >= 7) is not ported, see the
         module comment; tonality_analysis_reset() has no observable effect either. */
 

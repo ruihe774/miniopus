@@ -24,7 +24,8 @@ pub fn floor64(x: f64) -> f64 {
 /// PI from celt/mathops.h (a double constant).
 pub const PI: f64 = 3.1415926535897931;
 
-pub fn celt_maxabs16(x: &[f32], len: i32) -> f32 {
+/// C celt_maxabs16, celt_maxabs_res.
+pub fn maxabs(x: &[f32], len: i32) -> f32 {
     let mut maxval: f32 = 0.0;
     let mut minval: f32 = 0.0;
     for &v in &x[..len as usize] {
@@ -34,16 +35,10 @@ pub fn celt_maxabs16(x: &[f32], len: i32) -> f32 {
     maxval.max(-minval)
 }
 
-/// celt_maxabs_res (float build) = celt_maxabs16.
-#[inline(always)]
-pub fn celt_maxabs_res(x: &[f32], len: i32) -> f32 {
-    celt_maxabs16(x, len)
-}
-
 /// Calculates the arctangent of x using a Remez approximation of order 15,
 /// incorporating only odd-powered terms.
 #[inline]
-pub fn celt_atan_norm(x: f32) -> f32 {
+pub fn atan_norm(x: f32) -> f32 {
     const ATAN2_2_OVER_PI: f32 = 0.636619772367581;
     let x_sq = x * x;
     /* Polynomial coefficients approximated in the [0, 1] range.
@@ -76,40 +71,28 @@ pub fn celt_atan_norm(x: f32) -> f32 {
 
 /// Calculates the arctangent of y/x, returning an approximate value in radians.
 #[inline]
-pub fn celt_atan2p_norm(y: f32, x: f32) -> f32 {
+pub fn atan2p_norm(y: f32, x: f32) -> f32 {
     debug_assert!(x >= 0.0 && y >= 0.0);
     /* For very small values, we don't care about the answer. */
     if (x * x + y * y) < 1e-18 {
         return 0.0;
     }
     if y < x {
-        celt_atan_norm(y / x)
+        atan_norm(y / x)
     } else {
-        1.0 - celt_atan_norm(x / y)
+        1.0 - atan_norm(x / y)
     }
 }
 
-/// `(float)sqrt(x)`; also celt_sqrt32.
+/// `(float)sqrt(x)`; C celt_sqrt, celt_sqrt32.
 #[inline(always)]
-pub fn celt_sqrt(x: f32) -> f32 {
-    crate::celt::mathops::sqrt64(x as f64) as f32
+pub fn sqrt(x: f32) -> f32 {
+    sqrt64(x as f64) as f32
 }
+/// `1.f/sqrt(x)`; C celt_rsqrt, celt_rsqrt_norm, celt_rsqrt_norm32.
 #[inline(always)]
-pub fn celt_sqrt32(x: f32) -> f32 {
-    celt_sqrt(x)
-}
-/// `1.f/celt_sqrt(x)`; also celt_rsqrt_norm, celt_rsqrt_norm32.
-#[inline(always)]
-pub fn celt_rsqrt(x: f32) -> f32 {
-    1.0 / celt_sqrt(x)
-}
-#[inline(always)]
-pub fn celt_rsqrt_norm(x: f32) -> f32 {
-    celt_rsqrt(x)
-}
-#[inline(always)]
-pub fn celt_rsqrt_norm32(x: f32) -> f32 {
-    celt_rsqrt(x)
+pub fn rsqrt(x: f32) -> f32 {
+    1.0 / sqrt(x)
 }
 /// `(float)cos((.5f*PI)*(x))` for `0 < x < 1` (its only use, exp_rotation, passes `theta` and
 /// `1 - theta` with `theta < .5`). This is libm's `cos` (FreeBSD s_cos.c) restricted to the
@@ -117,7 +100,7 @@ pub fn celt_rsqrt_norm32(x: f32) -> f32 {
 /// `k_cos(a, 0)`, above it the `n == 1` case of `rem_pio2` (a - pi/2 in two parts) and
 /// `-k_sin`. The result is bit for bit that of `libm::cos` (checked for every `(len, K, spread)`
 /// that exp_rotation can see, and far beyond).
-pub fn celt_cos_norm(x: f32) -> f32 {
+pub fn cos_norm(x: f32) -> f32 {
     const C: [f64; 6] = [
         4.16666666666666019037e-02,
         -1.38888888888741095749e-03,
@@ -158,18 +141,18 @@ pub fn celt_cos_norm(x: f32) -> f32 {
         (-(y0 - ((z * (0.5 * y1 - v * r) - y1) - v * S1))) as f32
     }
 }
-/// `1.f/(x)`
+/// `1.f/(x)`; C celt_rcp.
 #[inline(always)]
-pub fn celt_rcp(x: f32) -> f32 {
+pub fn rcp(x: f32) -> f32 {
     1.0 / x
 }
 /// `(float)(1.442695040888963387*log(x))` for a positive normal finite `x` (band energies, which
-/// are at least `sqrt(1e-27)`, and `1.001 - c*c` with `|c| <= 1`); also celt_log2_db. This is
+/// are at least `sqrt(1e-27)`, and `1.001 - c*c` with `|c| <= 1`); C celt_log2, celt_log2_db. This is
 /// libm's `log` (FreeBSD e_log.c) without the special cases, with the argument reduction done on
 /// the `f32` bits: the split at `sqrt(2)` uses the 20 mantissa bits libm compares, so `k` and `f`
 /// are libm's. The result is bit for bit that of `libm::log` (checked for every positive normal
 /// finite `f32`).
-pub fn celt_log2(x: f32) -> f32 {
+pub fn log2(x: f32) -> f32 {
     const LN2_HI: f64 = 6.93147180369123816490e-01;
     const LN2_LO: f64 = 1.90821492927058770002e-10;
     const LG: [f64; 7] = [
@@ -198,11 +181,11 @@ pub fn celt_log2(x: f32) -> f32 {
     (1.442695040888963387 * (s * (hfsq + r) + dk * LN2_LO - hfsq + f + dk * LN2_HI)) as f32
 }
 /// `(float)exp(0.6931471805599453094*(x))` for `0 <= x <= 4` (its only use, the dynalloc
-/// importance, passes `MIN32(4, follower)` with `follower >= 0`); also celt_exp2_db. This is
+/// importance, passes `MIN32(4, follower)` with `follower >= 0`); C celt_exp2, celt_exp2_db. This is
 /// libm's `exp` (FreeBSD e_exp.c) without the special cases and `scalbn`: the reduction
 /// `x*ln2 = k*ln2 + r` takes `k` as `x` rounded half up (`0 <= k <= 4`), and `2^k` is exact.
 /// The result is bit for bit that of `libm::exp` (checked for every `f32` in `[0, 4]`).
-pub fn celt_exp2(x: f32) -> f32 {
+pub fn exp2(x: f32) -> f32 {
     const LN2_HI: f64 = 6.93147180369123816490e-01;
     const LN2_LO: f64 = 1.90821492927058770002e-10;
     const P: [f64; 5] = [
@@ -222,14 +205,6 @@ pub fn celt_exp2(x: f32) -> f32 {
     let c = r - rr * (P[0] + rr * (P[1] + rr * (P[2] + rr * (P[3] + rr * P[4]))));
     let y = 1. + (r * c / (2. - c) - lo + hi);
     (y * f64::from_bits(((0x3ff + k) as u64) << 52)) as f32
-}
-#[inline(always)]
-pub fn celt_log2_db(x: f32) -> f32 {
-    celt_log2(x)
-}
-#[inline(always)]
-pub fn celt_exp2_db(x: f32) -> f32 {
-    celt_exp2(x)
 }
 
 /// `acos(x)` (double) for `|x| < 1`: libm's `acos` (FreeBSD e_acos.c) with the hardware
@@ -271,13 +246,13 @@ pub fn acos64(x: f64) -> f64 {
     if (hx >> 31) != 0 {
         /* x < -0.5 */
         let z = (1.0 + x) * 0.5;
-        let s = super::mathops::sqrt64(z);
+        let s = sqrt64(z);
         let w = r(z) * s - PIO2_LO;
         return 2. * (PIO2_HI - (s + w));
     }
     /* x > 0.5 */
     let z = (1.0 - x) * 0.5;
-    let s = super::mathops::sqrt64(z);
+    let s = sqrt64(z);
     let df = f64::from_bits(s.to_bits() & 0xff_ff_ff_ff_00_00_00_00);
     let c = (z - df * df) / (s + df);
     let w = r(z) * s + c;

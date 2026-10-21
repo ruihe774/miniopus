@@ -13,7 +13,7 @@ use core::ptr;
 
 use super::entcode::{BITRES, EC_ILOG, celt_sudiv, celt_udiv, ec_ctx, ec_tell_frac};
 use super::entenc::{ec_enc_bit_logp, ec_enc_bits, ec_enc_uint, ec_encode};
-use super::mathops::{Q31ONE, celt_sqrt};
+use super::mathops::{EPSILON, Q31ONE, rsqrt, sqrt, sqrt64};
 use super::modes;
 use super::pitch::celt_inner_prod;
 use super::rate::{QTHETA_OFFSET, QTHETA_OFFSET_TWOPHASE, bits2pulses, get_pulses, pulses2bits};
@@ -107,7 +107,7 @@ pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], end: i32, C: i32) {
         for (e, b) in bandEc.iter_mut().zip(eBands.windows(2)).take(end as usize) {
             let band = &Xc[(b[0] as usize) << LM..(b[1] as usize) << LM];
             let sum: f32 = 1e-27f32 + celt_inner_prod(band, band, band.len() as i32);
-            *e = celt_sqrt(sum);
+            *e = sqrt(sum);
         }
     }
 }
@@ -152,8 +152,7 @@ fn intensity_stereo(X: &mut [f32], Y: &[f32], bandE: &[f32], bandID: i32, N: i32
     let i = bandID as usize;
     let left = bandE[i];
     let right = bandE[i + modes::nbEBands as usize];
-    let norm: f32 =
-        super::mathops::EPSILON + celt_sqrt(super::mathops::EPSILON + left * left + right * right);
+    let norm: f32 = EPSILON + sqrt(EPSILON + left * left + right * right);
     let a1 = left / norm;
     let a2 = right / norm;
     /* the callers pass X and Y with length N */
@@ -187,8 +186,8 @@ fn stereo_merge(X: &mut [f32], Y: &mut [f32], mid: f32, N: i32) {
         return;
     }
 
-    let lgain = super::mathops::celt_rsqrt_norm32(El);
-    let rgain = super::mathops::celt_rsqrt_norm32(Er);
+    let lgain = rsqrt(El);
+    let rgain = rsqrt(Er);
 
     for (x, y) in X[..N as usize].iter_mut().zip(&mut Y[..N as usize]) {
         /* Apply mid scaling (side is already scaled) */
@@ -996,7 +995,7 @@ unsafe fn quant_band(
 
         /* Scale output for later folding */
         if !lowband_out.is_null() {
-            let n: f32 = crate::celt::mathops::sqrt64(N0 as f64) as f32;
+            let n: f32 = sqrt64(N0 as f64) as f32;
             let lowband_out = unsafe { slice_mut(lowband_out, N0) };
             for (o, &v) in lowband_out.iter_mut().zip(x.iter()) {
                 *o = n * v;

@@ -9,10 +9,7 @@ use core::arch::wasm32::*;
 use super::bands::SPREAD_NONE;
 use super::cwrs::encode_pulses;
 use super::entcode::{celt_udiv, ec_enc};
-use super::mathops::{
-    EPSILON, celt_atan2p_norm, celt_cos_norm, celt_rcp, celt_rsqrt_norm, celt_rsqrt_norm32,
-    celt_sqrt32,
-};
+use super::mathops::{EPSILON, atan2p_norm, cos_norm, floor64, rcp, rsqrt, sqrt};
 use super::pitch::celt_inner_prod;
 use crate::stack;
 
@@ -53,8 +50,8 @@ pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, 
     let gain: f32 = (1.0f32 * len as f32) / ((len + factor * K) as f32);
     let theta: f32 = 0.5f32 * (gain * gain);
 
-    let c = celt_cos_norm(theta);
-    let s = celt_cos_norm(1.0f32 - theta); /*  sin(theta) */
+    let c = cos_norm(theta);
+    let s = cos_norm(1.0f32 - theta); /*  sin(theta) */
 
     if len >= 8 * stride {
         stride2 = 1;
@@ -85,7 +82,7 @@ pub fn exp_rotation(X: &mut [f32], mut len: i32, dir: i32, stride: i32, K: i32, 
 /// Normalizes the decoded integer pvq codeword to unit norm.
 fn normalise_residual(iy: &[i32], X: &mut [f32], N: i32, Ryy: f32, gain: f32) {
     let t = Ryy;
-    let g = celt_rsqrt_norm32(t) * gain;
+    let g = rsqrt(t) * gain;
     for (x, &y) in X[..N as usize].iter_mut().zip(&iy[..N as usize]) {
         *x = y as f32 * g;
     }
@@ -205,7 +202,7 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
                 sum = 1.0;
             }
             /* Using K+e with e < 1 guarantees we cannot get more than K pulses. */
-            let rcp4 = f32x4_splat((K as f32 + 0.8f32) * celt_rcp(sum));
+            let rcp4 = f32x4_splat((K as f32 + 0.8f32) * rcp(sum));
             let mut xy4 = f32x4_splat(0.0);
             let mut yy4 = f32x4_splat(0.0);
             let mut pulses_sum = i32x4_splat(0);
@@ -362,7 +359,7 @@ pub fn alg_quant(
 pub fn renormalise_vector(X: &mut [f32], N: i32, gain: f32) {
     let E: f32 = EPSILON + celt_inner_prod(X, X, N);
     let t = E;
-    let g: f32 = celt_rsqrt_norm(t) * gain;
+    let g: f32 = rsqrt(t) * gain;
 
     for x in &mut X[..N as usize] {
         *x = g * *x;
@@ -384,9 +381,7 @@ pub fn stereo_itheta(X: &[f32], Y: &[f32], stereo: i32, N: i32) -> i32 {
         Emid += celt_inner_prod(X, X, N);
         Eside += celt_inner_prod(Y, Y, N);
     }
-    let mid = celt_sqrt32(Emid);
-    let side = celt_sqrt32(Eside);
-    crate::celt::mathops::floor64(
-        (0.5f32 + 65536.0f32 * 16384.0 * celt_atan2p_norm(side, mid)) as f64,
-    ) as i32
+    let mid = sqrt(Emid);
+    let side = sqrt(Eside);
+    floor64((0.5f32 + 65536.0f32 * 16384.0 * atan2p_norm(side, mid)) as f64) as i32
 }
