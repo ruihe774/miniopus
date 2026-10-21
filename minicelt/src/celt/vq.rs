@@ -8,7 +8,7 @@ use core::arch::wasm32::*;
 
 use super::bands::SPREAD_NONE;
 use super::cwrs::encode_pulses;
-use super::simd::{hsum_f32, hsum_i32, laneselect, trunc_i32};
+use super::simd::{hsum_f32, hsum_i32, laneselect, madd, trunc_i32};
 use super::entcode::{celt_udiv, ec_enc};
 use super::mathops::{EPSILON, atan2p_norm, cos_norm, floor64, rcp, rsqrt, sqrt};
 use super::pitch::celt_inner_prod;
@@ -191,8 +191,8 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
                 pulses_sum = i32x4_add(pulses_sum, iy4);
                 v128_store(piy.add(j) as *mut v128, iy4);
                 let y4 = f32x4_convert_i32x4(iy4);
-                xy4 = f32x4_add(xy4, f32x4_mul(x4, y4));
-                yy4 = f32x4_add(yy4, f32x4_mul(y4, y4));
+                xy4 = madd(x4, y4, xy4);
+                yy4 = madd(y4, y4, yy4);
                 /* double the y[] vector so we don't have to do it in the search loop. */
                 v128_store(py.add(j) as *mut v128, f32x4_add(y4, y4));
                 j += 4;

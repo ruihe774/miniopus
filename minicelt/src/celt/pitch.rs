@@ -202,24 +202,9 @@ pub unsafe fn comb_filter_const(
             let x1v = i32x4_shuffle::<1, 2, 3, 4>(x0v, x4v);
             let x2v = i32x4_shuffle::<2, 3, 4, 5>(x0v, x4v);
             let x3v = i32x4_shuffle::<3, 4, 5, 6>(x0v, x4v);
-            #[cfg(target_feature = "relaxed-simd")]
-            {
-                yi = f32x4_relaxed_madd(g10v, x2v, yi);
-                yi = f32x4_relaxed_madd(g11v, f32x4_add(x3v, x1v), yi);
-                yi = f32x4_relaxed_madd(g12v, f32x4_add(x4v, x0v), yi);
-            }
-            #[cfg(not(target_feature = "relaxed-simd"))]
-            {
-                /* Use partial sums, like the SSE version. */
-                yi = f32x4_add(yi, f32x4_mul(g10v, x2v));
-                yi = f32x4_add(
-                    yi,
-                    f32x4_add(
-                        f32x4_mul(g11v, f32x4_add(x3v, x1v)),
-                        f32x4_mul(g12v, f32x4_add(x4v, x0v)),
-                    ),
-                );
-            }
+            yi = madd(g10v, x2v, yi);
+            yi = madd(g11v, f32x4_add(x3v, x1v), yi);
+            yi = madd(g12v, f32x4_add(x4v, x0v), yi);
             x0v = x4v;
             v128_store(y.offset(i) as *mut v128, yi);
             i += 4;
