@@ -58,14 +58,20 @@ fn twiddles() -> &'static [kiss_twiddle_cpx; 480] {
 pub fn bitrev(shift: i32) -> &'static [i16] {
     // SAFETY: as `twiddles`.
     unsafe {
-        if shift == 0 { &(*TABLES.0.get()).bitrev480 } else { &(*TABLES.0.get()).bitrev60 }
+        if shift == 0 {
+            &(*TABLES.0.get()).bitrev480
+        } else {
+            &(*TABLES.0.get()).bitrev60
+        }
     }
 }
 
 /// compute_bitrev_table() of kiss_fft.c (`f` starts at the C `f`).
 fn compute_bitrev_table(mut Fout: i32, f: &mut [i16], fstride: usize, factors: &[i16]) {
     /* the list always ends with m == 1 before it runs out */
-    let &[p, m, ref rest @ ..] = factors else { return };
+    let &[p, m, ref rest @ ..] = factors else {
+        return;
+    };
     for k in 0..p as usize {
         let f = &mut f[k * fstride..];
         if m == 1 {
@@ -80,7 +86,9 @@ fn compute_bitrev_table(mut Fout: i32, f: &mut [i16], fstride: usize, factors: &
 
 /// Builds the twiddle and bit-reversal tables (call once before encoding).
 pub fn init_fft() {
-    use super::static_modes_float::{fft_state48000_960_0, fft_state48000_960_3, fft_twiddles48000_960 as octant};
+    use super::static_modes_float::{
+        fft_state48000_960_0, fft_state48000_960_3, fft_twiddles48000_960 as octant,
+    };
     // SAFETY: nothing reads the tables while they are rebuilt (init only).
     let t = unsafe { &mut *TABLES.0.get() };
     let tw = &mut t.twiddles;
@@ -114,17 +122,26 @@ unsafe impl crate::stack::Pod for kiss_fft_cpx {}
 /// C_MUL(m,a,b): `m.r = a.r*b.r - a.i*b.i; m.i = a.r*b.i + a.i*b.r`
 #[inline(always)]
 fn C_MUL(a: kiss_fft_cpx, b: kiss_twiddle_cpx) -> kiss_fft_cpx {
-    kiss_fft_cpx { r: a.r * b.r - a.i * b.i, i: a.r * b.i + a.i * b.r }
+    kiss_fft_cpx {
+        r: a.r * b.r - a.i * b.i,
+        i: a.r * b.i + a.i * b.r,
+    }
 }
 /// C_ADD(res,a,b)
 #[inline(always)]
 fn C_ADD(a: kiss_fft_cpx, b: kiss_fft_cpx) -> kiss_fft_cpx {
-    kiss_fft_cpx { r: a.r + b.r, i: a.i + b.i }
+    kiss_fft_cpx {
+        r: a.r + b.r,
+        i: a.i + b.i,
+    }
 }
 /// C_SUB(res,a,b)
 #[inline(always)]
 fn C_SUB(a: kiss_fft_cpx, b: kiss_fft_cpx) -> kiss_fft_cpx {
-    kiss_fft_cpx { r: a.r - b.r, i: a.i - b.i }
+    kiss_fft_cpx {
+        r: a.r - b.r,
+        i: a.i - b.i,
+    }
 }
 /// C_ADDTO(res,a)
 #[inline(always)]
@@ -169,7 +186,14 @@ fn kf_bfly2(Fout: &mut [kiss_fft_cpx], m: i32, N: i32) {
 }
 
 #[inline(always)]
-fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
+fn kf_bfly4(
+    Fout: &mut [kiss_fft_cpx],
+    fstride: usize,
+    tw: &[kiss_twiddle_cpx; 480],
+    m: i32,
+    N: i32,
+    mm: i32,
+) {
     if m == 1 {
         /* Degenerate case where all the twiddles are 1. */
         for f in &mut Fout.as_chunks_mut::<4>().0[..N as usize] {
@@ -221,7 +245,14 @@ fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 }
 
 #[inline(always)]
-fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
+fn kf_bfly3(
+    Fout: &mut [kiss_fft_cpx],
+    fstride: usize,
+    tw: &[kiss_twiddle_cpx; 480],
+    m: i32,
+    N: i32,
+    mm: i32,
+) {
     let m = m as usize;
     let m2 = 2 * m;
     let mut scratch = [kiss_fft_cpx::default(); 5];
@@ -265,7 +296,14 @@ fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 }
 
 #[inline(always)]
-fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
+fn kf_bfly5(
+    Fout: &mut [kiss_fft_cpx],
+    fstride: usize,
+    tw: &[kiss_twiddle_cpx; 480],
+    m: i32,
+    N: i32,
+    mm: i32,
+) {
     let m = m as usize;
     let mut scratch = [kiss_fft_cpx::default(); 13];
     let ya = tw[fstride * m];

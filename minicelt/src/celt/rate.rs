@@ -1,6 +1,6 @@
 //! Port of celt/rate.h and celt/rate.c (encoder side; static pulse cache).
 
-use super::entcode::{ec_ctx, celt_udiv, BITRES};
+use super::entcode::{BITRES, celt_udiv, ec_ctx};
 use super::entenc::{ec_enc_bit_logp, ec_enc_uint};
 use super::modes;
 
@@ -17,24 +17,32 @@ pub const QTHETA_OFFSET_TWOPHASE: i32 = 16;
 /// Fixed interface (used by bands.rs).
 #[inline]
 pub fn get_pulses(i: i32) -> i32 {
-    if i < 8 { i } else { (8 + (i & 7)) << ((i >> 3) - 1) }
+    if i < 8 {
+        i
+    } else {
+        (8 + (i & 7)) << ((i >> 3) - 1)
+    }
 }
 
 /// Fixed interface (used by bands.rs).
 pub fn bits2pulses(band: i32, LM: i32, mut bits: i32) -> i32 {
     let LM = LM + 1;
     /* `cache_bits` is padded so that every entry has a 65-byte window (entries hold at most 40):
-       the indices below are at most 64 by construction, so they need no bounds check. */
+    the indices below are at most 64 by construction, so they need no bounds check. */
     let ci = modes::cache_index[(LM * modes::nbEBands + band) as usize] as usize;
     let cache: &[u8; 65] = modes::cache_bits[ci..].first_chunk().unwrap();
     let n = cache[0] as usize;
 
     bits -= 1;
     /* The binary search of rate.h (LOG_MAX_PSEUDO = 6 steps over 1..=n) as a branchless search:
-       cache[1..=n] is non-decreasing, so lo is the number of entries below bits. */
+    cache[1..=n] is non-decreasing, so lo is the number of entries below bits. */
     let step = |lo: usize, half: usize| {
         let k = lo + half;
-        if (k <= n) & ((cache[k] as i32) < bits) { k } else { lo }
+        if (k <= n) & ((cache[k] as i32) < bits) {
+            k
+        } else {
+            lo
+        }
     };
     let lo = step(step(step(step(step(step(0, 32), 16), 8), 4), 2), 1);
     let hi = if lo < n { lo + 1 } else { lo };
@@ -52,7 +60,11 @@ pub fn pulses2bits(band: i32, LM: i32, pulses: i32) -> i32 {
     /* the window of `bits2pulses` (pulses <= 40) */
     let ci = modes::cache_index[(LM * modes::nbEBands + band) as usize] as usize;
     let cache: &[u8; 65] = modes::cache_bits[ci..].first_chunk().unwrap();
-    if pulses == 0 { 0 } else { cache[pulses as usize] as i32 + 1 }
+    if pulses == 0 {
+        0
+    } else {
+        cache[pulses as usize] as i32 + 1
+    }
 }
 
 const ALLOC_STEPS: i32 = 6;
@@ -63,17 +75,33 @@ fn eb(i: i32) -> i32 {
 }
 
 fn interp_bits2pulses(
-    end: i32, skip_start: i32, bits1: &[i32], bits2: &[i32], thresh: &[i32],
-    cap: &[i32], mut total: i32, _balance: &mut i32, skip_rsv: i32, intensity: &mut i32,
-    mut intensity_rsv: i32, dual_stereo: &mut i32, mut dual_stereo_rsv: i32, bits: &mut [i32],
-    ebits: &mut [i32], fine_priority: &mut [i32], C: i32, ec: &mut ec_ctx, prev: i32,
+    end: i32,
+    skip_start: i32,
+    bits1: &[i32],
+    bits2: &[i32],
+    thresh: &[i32],
+    cap: &[i32],
+    mut total: i32,
+    _balance: &mut i32,
+    skip_rsv: i32,
+    intensity: &mut i32,
+    mut intensity_rsv: i32,
+    dual_stereo: &mut i32,
+    mut dual_stereo_rsv: i32,
+    bits: &mut [i32],
+    ebits: &mut [i32],
+    fine_priority: &mut [i32],
+    C: i32,
+    ec: &mut ec_ctx,
+    prev: i32,
 ) -> i32 {
     /* start == 0, LM == 3 */
     let start = 0;
     let LM = 3;
     let eu = end as usize;
     let (bits1, bits2, thresh, cap) = (&bits1[..eu], &bits2[..eu], &thresh[..eu], &cap[..eu]);
-    let (bits, ebits, fine_priority) = (&mut bits[..eu], &mut ebits[..eu], &mut fine_priority[..eu]);
+    let (bits, ebits, fine_priority) =
+        (&mut bits[..eu], &mut ebits[..eu], &mut fine_priority[..eu]);
     /* indexed by the same band counters as `bits` */
     let (log2_frac, logN) = (&LOG2_FRAC_TABLE[..eu], &modes::logN[..eu]);
     let mut psum: i32;
@@ -140,11 +168,11 @@ fn interp_bits2pulses(
     loop {
         j = codedBands - 1;
         /* Never skip the first band, nor a band that has been boosted by
-            dynalloc.
-           In the first case, we'd be coding a bit to signal we're going to waste
-            all the other bits.
-           In the second case, we'd be coding a bit to redistribute all the bits
-            we just signaled should be concentrated in this band. */
+         dynalloc.
+        In the first case, we'd be coding a bit to signal we're going to waste
+         all the other bits.
+        In the second case, we'd be coding a bit to redistribute all the bits
+         we just signaled should be concentrated in this band. */
         if j <= skip_start {
             /* Give the bit we reserved to end skipping back. */
             total += skip_rsv;
@@ -152,7 +180,7 @@ fn interp_bits2pulses(
         }
         let ju = j as usize;
         /*Figure out how many left-over bits we would be adding to this band.
-          This can include bits we've stolen back from higher, skipped bands.*/
+        This can include bits we've stolen back from higher, skipped bands.*/
         left = total - psum;
         /* celt_udiv takes unsigned arguments and returns unsigned */
         percoeff = celt_udiv(left as u32, (eb(codedBands) - eb(start)) as u32) as i32;
@@ -161,14 +189,14 @@ fn interp_bits2pulses(
         let band_width = eb(codedBands) - eb(j);
         let mut band_bits = bits[ju] + percoeff * band_width + rem;
         /*Only code a skip decision if we're above the threshold for this band.
-          Otherwise it is force-skipped.
-          This ensures that we have enough bits to code the skip flag.*/
+        Otherwise it is force-skipped.
+        This ensures that we have enough bits to code the skip flag.*/
         if band_bits >= thresh[ju].max(alloc_floor + (1 << BITRES)) {
             /*This if() block is the only part of the allocation function that
-               is not a mandatory part of the bitstream: any bands we choose to
-               skip here must be explicitly signaled.*/
+            is not a mandatory part of the bitstream: any bands we choose to
+            skip here must be explicitly signaled.*/
             /*We choose a threshold with some hysteresis to keep bands from
-               fluctuating in and out, but we try not to fold below a certain point. */
+            fluctuating in and out, but we try not to fold below a certain point. */
             let depth_threshold = if codedBands > 17 {
                 if j < prev { 7 } else { 9 }
             } else {
@@ -207,7 +235,11 @@ fn interp_bits2pulses(
     /* Code the intensity and dual stereo parameters. */
     if intensity_rsv > 0 {
         *intensity = (*intensity).min(codedBands);
-        ec_enc_uint(ec, (*intensity - start) as u32, (codedBands + 1 - start) as u32);
+        ec_enc_uint(
+            ec,
+            (*intensity - start) as u32,
+            (codedBands + 1 - start) as u32,
+        );
     } else {
         *intensity = 0;
     }
@@ -254,12 +286,17 @@ fn interp_bits2pulses(
             bits[ju] = bit - excess;
 
             /* Compensate for the extra DoF in stereo */
-            let den = C * N + if C == 2 && N > 2 && *dual_stereo == 0 && j < *intensity { 1 } else { 0 };
+            let den = C * N
+                + if C == 2 && N > 2 && *dual_stereo == 0 && j < *intensity {
+                    1
+                } else {
+                    0
+                };
 
             let NClogN = den * (logN[ju] as i32 + logM);
 
             /* Offset for the number of fine bits by log2(N)/2 + FINE_OFFSET
-               compared to their "fair share" of total/N */
+            compared to their "fair share" of total/N */
             let mut offset = (NClogN >> 1) - den * FINE_OFFSET;
 
             /* N=2 is the only point that doesn't match the curve */
@@ -268,7 +305,7 @@ fn interp_bits2pulses(
             }
 
             /* Changing the offset for allocating the second and third
-                fine energy bit */
+            fine energy bit */
             if bits[ju] + offset < den * 2 << BITRES {
                 offset += NClogN >> 2;
             } else if bits[ju] + offset < den * 3 << BITRES {
@@ -288,7 +325,7 @@ fn interp_bits2pulses(
             ebits[ju] = ebits[ju].min(MAX_FINE_BITS);
 
             /* If we rounded down or capped this band, make it a candidate for the
-                final fine energy pass */
+            final fine energy pass */
             fine_priority[ju] = (ebits[ju] * (den << BITRES) >= bits[ju] + offset) as i32;
 
             /* Remove the allocated fine bits; the rest are assigned to PVQ */
@@ -302,8 +339,8 @@ fn interp_bits2pulses(
         }
 
         /* Fine energy can't take advantage of the re-balancing in
-            quant_all_bands().
-           Instead, do the re-balancing here.*/
+         quant_all_bands().
+        Instead, do the re-balancing here.*/
         if excess > 0 {
             let extra_fine = (excess >> (stereo + BITRES)).min(MAX_FINE_BITS - ebits[ju]);
             ebits[ju] += extra_fine;
@@ -318,7 +355,7 @@ fn interp_bits2pulses(
         j += 1;
     }
     /* Save any remaining bits over the cap for the rebalancing in
-        quant_all_bands(). */
+    quant_all_bands(). */
     *_balance = balance;
 
     /* The skipped bands use all their bits for fine energy. */
@@ -337,9 +374,20 @@ fn interp_bits2pulses(
 /// (always encoding; `pulses` receives the bits per band).
 /// Returns codedBands.
 pub fn clt_compute_allocation(
-    end: i32, offsets: &[i32], cap: &[i32], alloc_trim: i32,
-    intensity: &mut i32, dual_stereo: &mut i32, mut total: i32, balance: &mut i32, pulses: &mut [i32],
-    ebits: &mut [i32], fine_priority: &mut [i32], C: i32, ec: &mut ec_ctx, prev: i32,
+    end: i32,
+    offsets: &[i32],
+    cap: &[i32],
+    alloc_trim: i32,
+    intensity: &mut i32,
+    dual_stereo: &mut i32,
+    mut total: i32,
+    balance: &mut i32,
+    pulses: &mut [i32],
+    ebits: &mut [i32],
+    fine_priority: &mut [i32],
+    C: i32,
+    ec: &mut ec_ctx,
+    prev: i32,
 ) -> i32 {
     /* start == 0, LM == 3 */
     let start = 0;
@@ -373,9 +421,16 @@ pub fn clt_compute_allocation(
     let trim_offset = st.alloc::<i32>(len as usize);
     let eu = end as usize;
     let (offsets, cap) = (&offsets[..eu], &cap[..eu]);
-    let (bits1, bits2, thresh, trim_offset) = (&mut bits1[..eu], &mut bits2[..eu], &mut thresh[..eu], &mut trim_offset[..eu]);
+    let (bits1, bits2, thresh, trim_offset) = (
+        &mut bits1[..eu],
+        &mut bits2[..eu],
+        &mut thresh[..eu],
+        &mut trim_offset[..eu],
+    );
     /* the allocation vectors, one row of nbEBands per quality level, cut to `end` */
-    let alloc_rows = modes::allocVectors.as_chunks::<{ modes::nbEBands as usize }>().0;
+    let alloc_rows = modes::allocVectors
+        .as_chunks::<{ modes::nbEBands as usize }>()
+        .0;
     let alloc = |q: i32| &alloc_rows[q as usize][..eu];
 
     for j in start..end {
@@ -386,7 +441,7 @@ pub fn clt_compute_allocation(
         /* Tilt of the allocation curve */
         trim_offset[ju] = C * N * (alloc_trim - 5 - LM) * (end - j - 1) * (1 << (LM + BITRES)) >> 6;
         /* Giving less resolution to single-coefficient bands because they get
-           more benefit from having one coarse value per coefficient*/
+        more benefit from having one coarse value per coefficient*/
         if N << LM == 1 {
             trim_offset[ju] -= C << BITRES;
         }
@@ -456,7 +511,24 @@ pub fn clt_compute_allocation(
         bits2[ju] = bits2j;
     }
     interp_bits2pulses(
-        end, skip_start, bits1, bits2, thresh, cap, total, balance, skip_rsv, intensity,
-        intensity_rsv, dual_stereo, dual_stereo_rsv, pulses, ebits, fine_priority, C, ec, prev,
+        end,
+        skip_start,
+        bits1,
+        bits2,
+        thresh,
+        cap,
+        total,
+        balance,
+        skip_rsv,
+        intensity,
+        intensity_rsv,
+        dual_stereo,
+        dual_stereo_rsv,
+        pulses,
+        ebits,
+        fine_priority,
+        C,
+        ec,
+        prev,
     )
 }

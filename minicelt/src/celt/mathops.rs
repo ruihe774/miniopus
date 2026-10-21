@@ -69,7 +69,9 @@ pub fn celt_atan_norm(x: f32) -> f32 {
                                     * (ATAN2_COEFF_A09
                                         + x_sq
                                             * (ATAN2_COEFF_A11
-                                                + x_sq * (ATAN2_COEFF_A13 + x_sq * ATAN2_COEFF_A15)))))))
+                                                + x_sq
+                                                    * (ATAN2_COEFF_A13
+                                                        + x_sq * ATAN2_COEFF_A15)))))))
 }
 
 /// Calculates the arctangent of y/x, returning an approximate value in radians.
@@ -80,7 +82,11 @@ pub fn celt_atan2p_norm(y: f32, x: f32) -> f32 {
     if (x * x + y * y) < 1e-18 {
         return 0.0;
     }
-    if y < x { celt_atan_norm(y / x) } else { 1.0 - celt_atan_norm(x / y) }
+    if y < x {
+        celt_atan_norm(y / x)
+    } else {
+        1.0 - celt_atan_norm(x / y)
+    }
 }
 
 /// `(float)sqrt(x)`; also celt_sqrt32.

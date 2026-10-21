@@ -61,7 +61,11 @@ pub unsafe fn comb_filter(
         let mut x3 = *x.offset(-t1 - 1);
         let mut x4 = *x.offset(-t1 - 2);
         /* If the filter didn't change, we don't need the overlap */
-        let overlap = if g0 == g1 && T0 == T1 && tapset0 == tapset1 { 0 } else { modes::overlap };
+        let overlap = if g0 == g1 && T0 == T1 && tapset0 == tapset1 {
+            0
+        } else {
+            modes::overlap
+        };
         let window = &modes::window;
         let mut i: isize = 0;
         while i < overlap as isize {
@@ -84,7 +88,11 @@ pub unsafe fn comb_filter(
         if g1 == 0.0 {
             /* OPT: Happens to work without the OPUS_MOVE(), but only because the current encoder already copies x to y */
             if x != y as *const f32 {
-                core::ptr::copy(x.offset(overlap as isize), y.offset(overlap as isize), (N - overlap) as usize);
+                core::ptr::copy(
+                    x.offset(overlap as isize),
+                    y.offset(overlap as isize),
+                    (N - overlap) as usize,
+                );
             }
             return;
         }

@@ -99,7 +99,9 @@ pub fn ec_enc_init(this: &mut ec_enc, buf: *mut u8, size: u32) {
 pub fn ec_encode(this: &mut ec_enc, fl: u32, fh: u32, ft: u32) {
     let r = celt_udiv(this.rng, ft);
     if fl > 0 {
-        this.val = this.val.wrapping_add(this.rng.wrapping_sub(r.wrapping_mul(ft - fl)));
+        this.val = this
+            .val
+            .wrapping_add(this.rng.wrapping_sub(r.wrapping_mul(ft - fl)));
         this.rng = r.wrapping_mul(fh - fl);
     } else {
         this.rng = this.rng.wrapping_sub(r.wrapping_mul(ft - fh));
@@ -110,7 +112,9 @@ pub fn ec_encode(this: &mut ec_enc, fl: u32, fh: u32, ft: u32) {
 pub fn ec_encode_bin(this: &mut ec_enc, fl: u32, fh: u32, bits: u32) {
     let r = this.rng >> bits;
     if fl > 0 {
-        this.val = this.val.wrapping_add(this.rng.wrapping_sub(r.wrapping_mul((1u32 << bits) - fl)));
+        this.val = this
+            .val
+            .wrapping_add(this.rng.wrapping_sub(r.wrapping_mul((1u32 << bits) - fl)));
         this.rng = r.wrapping_mul(fh - fl);
     } else {
         this.rng = this.rng.wrapping_sub(r.wrapping_mul((1u32 << bits) - fh));
@@ -146,7 +150,9 @@ pub unsafe fn ec_enc_icdf_ptr(this: &mut ec_enc, s: i32, icdf: *const u8, ftb: u
         if s > 0 {
             let a = *icdf.add(s as usize - 1) as u32;
             let b = *icdf.add(s as usize) as u32;
-            this.val = this.val.wrapping_add(this.rng.wrapping_sub(r.wrapping_mul(a)));
+            this.val = this
+                .val
+                .wrapping_add(this.rng.wrapping_sub(r.wrapping_mul(a)));
             this.rng = r.wrapping_mul(a - b);
         } else {
             this.rng = this.rng.wrapping_sub(r.wrapping_mul(*icdf as u32));

@@ -26,7 +26,14 @@ const _: () = assert!(OV % 4 == 0);
 /// index has a constant bound (the slices are cut to their constant lengths once, no check in the
 /// loops). The C fold writes the folded input to a buffer `f` that the pre-rotation then reads;
 /// here each folded pair is rotated at once, so `f` does not exist.
-pub fn clt_mdct_forward(in_: &[f32], in_off: usize, out: &mut [f32], out_off: usize, shift: i32, stride: i32) {
+pub fn clt_mdct_forward(
+    in_: &[f32],
+    in_off: usize,
+    out: &mut [f32],
+    out_off: usize,
+    shift: i32,
+    stride: i32,
+) {
     let sg = stack::save();
     let bitrev_t = bitrev(shift);
     let x = &in_[in_off..];
@@ -50,7 +57,13 @@ pub fn clt_mdct_forward(in_: &[f32], in_off: usize, out: &mut [f32], out_off: us
 /// `P` is the power of two at or above `N2 / 2` (the length of `f2`); the bit-reversal index is
 /// masked with `P - 1`, a no-op since the table is a permutation of `0..N2 / 2`.
 #[inline(always)]
-fn fold_rotate<const N2: usize, const P: usize>(x: &[f32], f2: &mut [kiss_fft_cpx], trig: &[f32], bitrev: &[i16], scale: f32) {
+fn fold_rotate<const N2: usize, const P: usize>(
+    x: &[f32],
+    f2: &mut [kiss_fft_cpx],
+    trig: &[f32],
+    bitrev: &[i16],
+    scale: f32,
+) {
     let n4 = N2 / 2;
     let x = &x[..N2 + OV];
     let w = &modes::window;
@@ -63,7 +76,10 @@ fn fold_rotate<const N2: usize, const P: usize>(x: &[f32], f2: &mut [kiss_fft_cp
         let yi = im * t0 + re * t1;
         debug_assert!((bitrev[i] as usize) < n4);
         /* For floating-point it is best to scale after the rotation (no QEXT). */
-        f2[bitrev[i] as usize & (P - 1)] = kiss_fft_cpx { r: yr * scale, i: yi * scale };
+        f2[bitrev[i] as usize & (P - 1)] = kiss_fft_cpx {
+            r: yr * scale,
+            i: yi * scale,
+        };
     };
     /* The C xp1 = OV2 + 2i, xp2 = N2 - 1 + OV2 - 2i and, in the first NQ pairs, wp1 = OV2 + 2i and
     wp2 = OV2 - 1 - 2i, in the last NQ pairs wp1 = 2t and wp2 = OV - 1 - 2t (t = i - (n4 - NQ)). */
@@ -91,7 +107,12 @@ fn fold_rotate<const N2: usize, const P: usize>(x: &[f32], f2: &mut [kiss_fft_cp
 /// The N/4 complex FFT of `f2[.. N2 / 2]` (does not downscale anymore), then the post-rotation:
 /// writes `out[2 * S * i]` and `out[S * (N2 - 1 - 2 * i)]` for `i` in `0..N2 / 2` (output stride `S`).
 #[inline(always)]
-fn fft_post<const N2: usize, const S: usize>(st: &kiss_fft_state, f2: &mut [kiss_fft_cpx], out: &mut [f32], trig: &[f32]) {
+fn fft_post<const N2: usize, const S: usize>(
+    st: &kiss_fft_state,
+    f2: &mut [kiss_fft_cpx],
+    out: &mut [f32],
+    trig: &[f32],
+) {
     let n4 = N2 / 2;
     let f2 = &mut f2[..n4];
     opus_fft_impl(st, f2);

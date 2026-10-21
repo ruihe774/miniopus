@@ -68,10 +68,14 @@ for mono and stereo. The inputs (voice / music) are
   voice: 9000/700 NB<->MB, 9000/700 MB<->WB, 13500/1000 WB<->SWB, 14000/2000 SWB<->FB
   music: 9000/700 NB<->MB, 9000/700 MB<->WB, 11000/1000 WB<->SWB, 12000/2000 SWB<->FB */
 static bandwidth_thresholds: [i32; 8] = [
-    9000, 700, /* NB<->MB */
-    9000, 700, /* MB<->WB */
-    11000 + ((48 * 48 * (13500 - 11000)) >> 14), 1000, /* WB<->SWB */
-    12000 + ((48 * 48 * (14000 - 12000)) >> 14), 2000, /* SWB<->FB */
+    9000,
+    700, /* NB<->MB */
+    9000,
+    700, /* MB<->WB */
+    11000 + ((48 * 48 * (13500 - 11000)) >> 14),
+    1000, /* WB<->SWB */
+    12000 + ((48 * 48 * (14000 - 12000)) >> 14),
+    2000, /* SWB<->FB */
 ];
 /* Threshold bit-rate for switching between mono and stereo (music + voice interpolation) */
 const stereo_threshold: i32 = 17000 + ((48 * 48 * (19000 - 17000)) >> 14);
@@ -235,7 +239,9 @@ impl OpusEncoder {
 
     /// `OPUS_SET_BANDWIDTH` (`OPUS_BANDWIDTH_*` or `OPUS_AUTO`).
     pub fn set_bandwidth(&mut self, value: i32) -> i32 {
-        if (value < OPUS_BANDWIDTH_NARROWBAND || value > OPUS_BANDWIDTH_FULLBAND) && value != OPUS_AUTO {
+        if (value < OPUS_BANDWIDTH_NARROWBAND || value > OPUS_BANDWIDTH_FULLBAND)
+            && value != OPUS_AUTO
+        {
             return OPUS_BAD_ARG;
         }
         self.user_bandwidth = value;
@@ -299,7 +305,12 @@ impl OpusEncoder {
     /// and must hold `channels * IN_BUF_FRAME` samples. `lsb_depth` is the depth of the
     /// source (24 for float input; 16 for `opus_encode` of 16-bit input scaled to +-1).
     /// Returns the packet length (1..=1276 bytes at `data`) or a negative Opus error code.
-    pub fn encode_float(&mut self, buf: &mut [f32], data: &mut [u8; PACKET_SIZE_CAP], lsb_depth: i32) -> i32 {
+    pub fn encode_float(
+        &mut self,
+        buf: &mut [f32],
+        data: &mut [u8; PACKET_SIZE_CAP],
+        lsb_depth: i32,
+    ) -> i32 {
         if self.channels == 0 {
             return OPUS_BAD_ARG;
         }
@@ -308,7 +319,8 @@ impl OpusEncoder {
         self.rangeFinal = 0;
         /* "Cannot encode 100 ms in 1 byte" does not apply to 20 ms frames. */
 
-        let is_silence = celt_maxabs_res(pcm, FRAME_SIZE * self.channels) <= 1.0f32 / (1i32 << lsb_depth) as f32;
+        let is_silence =
+            celt_maxabs_res(pcm, FRAME_SIZE * self.channels) <= 1.0f32 / (1i32 << lsb_depth) as f32;
         /* analysis_info.valid = 0: run_analysis() (complexity >= 7) is not ported, see the
         module comment; tonality_analysis_reset() has no observable effect either. */
 
@@ -371,8 +383,10 @@ impl OpusEncoder {
         {
             let mut bandwidth = OPUS_BANDWIDTH_FULLBAND;
             loop {
-                let mut threshold = bandwidth_thresholds[(2 * (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND)) as usize];
-                let hysteresis = bandwidth_thresholds[(2 * (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND) + 1) as usize];
+                let mut threshold =
+                    bandwidth_thresholds[(2 * (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND)) as usize];
+                let hysteresis = bandwidth_thresholds
+                    [(2 * (bandwidth - OPUS_BANDWIDTH_MEDIUMBAND) + 1) as usize];
                 if self.first == 0 {
                     if self.auto_bandwidth >= bandwidth {
                         threshold -= hysteresis;
@@ -511,7 +525,9 @@ impl OpusEncoder {
             /* frame_size_ms_Q1 = 2 * 1000 * 960 / 48000 */
             self.nb_no_activity_ms_Q1 += 40;
             if self.nb_no_activity_ms_Q1 > NB_SPEECH_FRAMES_BEFORE_DTX * 20 * 2 {
-                if self.nb_no_activity_ms_Q1 <= (NB_SPEECH_FRAMES_BEFORE_DTX + MAX_CONSECUTIVE_DTX) * 20 * 2 {
+                if self.nb_no_activity_ms_Q1
+                    <= (NB_SPEECH_FRAMES_BEFORE_DTX + MAX_CONSECUTIVE_DTX) * 20 * 2
+                {
                     /* Valid frame for DTX! */
                     self.rangeFinal = 0;
                     unsafe { *data_ptr = toc };

@@ -18,9 +18,9 @@ use crate::stack;
 
 /// Mean energy in each band quantized in Q4 and converted back to float
 pub static eMeans: [f32; 21] = [
-    6.437500, 6.250000, 5.750000, 5.312500, 5.062500, 4.812500, 4.500000, 4.375000, 4.875000, 4.687500,
-    4.562500, 4.437500, 4.875000, 4.625000, 4.312500, 4.500000, 4.375000, 4.625000, 4.750000, 4.437500,
-    3.750000,
+    6.437500, 6.250000, 5.750000, 5.312500, 5.062500, 4.812500, 4.500000, 4.375000, 4.875000,
+    4.687500, 4.562500, 4.437500, 4.875000, 4.625000, 4.312500, 4.500000, 4.375000, 4.625000,
+    4.750000, 4.437500, 3.750000,
 ];
 
 /* prediction coefficients: 0.9, 0.8, 0.65, 0.5 for LM = 0..3; only LM == 3 is used */
@@ -29,10 +29,10 @@ pub const beta_coef: f32 = 6554.0 / 32768.0;
 pub const beta_intra: f32 = 4915.0 / 32768.0;
 
 /*Parameters of the Laplace-like probability models used for the coarse energy.
-  There is one pair of parameters for each prediction type (inter/intra) and band number
-   (960-sample frames only).
-  The first number of each pair is the probability of 0, and the second is the
-   decay rate, both in Q8 precision.*/
+There is one pair of parameters for each prediction type (inter/intra) and band number
+ (960-sample frames only).
+The first number of each pair is the probability of 0, and the second is the
+ decay rate, both in Q8 precision.*/
 #[rustfmt::skip]
 pub static e_prob_model: [[u8; 42]; 2] = [
     // Inter
@@ -51,7 +51,14 @@ pub static e_prob_model: [[u8; 42]; 2] = [
 
 pub static small_energy_icdf: [u8; 3] = [2, 1, 0];
 
-pub fn loss_distortion(eBands: &[f32], oldEBands: &[f32], start: i32, end: i32, len: i32, C: i32) -> f32 {
+pub fn loss_distortion(
+    eBands: &[f32],
+    oldEBands: &[f32],
+    start: i32,
+    end: i32,
+    len: i32,
+    C: i32,
+) -> f32 {
     let mut dist: f32 = 0.0;
     for c in 0..C {
         let base = (c * len) as usize;
@@ -129,7 +136,12 @@ fn quant_coarse_energy_impl(
             }
             if budget - tell >= 15 {
                 let pi = 2 * (i as usize).min(20);
-                ec_laplace_encode(enc, &mut qi, (prob_model[pi] as u32) << 7, (prob_model[pi + 1] as i32) << 6);
+                ec_laplace_encode(
+                    enc,
+                    &mut qi,
+                    (prob_model[pi] as u32) << 7,
+                    (prob_model[pi + 1] as i32) << 6,
+                );
             } else if budget - tell >= 2 {
                 qi = (-1i32).max(qi.min(1));
                 ec_enc_icdf(enc, (2 * qi) ^ -((qi < 0) as i32), &small_energy_icdf, 2);
@@ -172,10 +184,12 @@ pub fn quant_coarse_energy(
     let mut badness1: i32 = 0;
     let sg = stack::save();
 
-    let mut intra: i32 =
-        (two_pass == 0 && *delayedIntra > (2 * C * (end - start)) as f32 && nbAvailableBytes > (end - start) * C) as i32;
+    let mut intra: i32 = (two_pass == 0
+        && *delayedIntra > (2 * C * (end - start)) as f32
+        && nbAvailableBytes > (end - start) * C) as i32;
     /* budget (unsigned) * float * int / int: the whole expression is float. */
-    let intra_bias: i32 = (((budget as f32 * *delayedIntra) * loss_rate as f32) / (C * 512) as f32) as i32;
+    let intra_bias: i32 =
+        (((budget as f32 * *delayedIntra) * loss_rate as f32) / (C * 512) as f32) as i32;
     let new_distortion = loss_distortion(eBands, oldEBands, start, end, modes::nbEBands, C);
 
     let tell: u32 = ec_tell(enc) as u32;
@@ -197,8 +211,17 @@ pub fn quant_coarse_energy(
 
     if two_pass != 0 || intra != 0 {
         badness1 = quant_coarse_energy_impl(
-            end, eBands, oldEBands_intra, budget as i32, tell as i32,
-            &e_prob_model[1], error_intra, enc, C, 1, max_decay,
+            end,
+            eBands,
+            oldEBands_intra,
+            budget as i32,
+            tell as i32,
+            &e_prob_model[1],
+            error_intra,
+            enc,
+            C,
+            1,
+            max_decay,
         );
     }
 
@@ -210,18 +233,30 @@ pub fn quant_coarse_energy(
         let nstart_bytes: u32 = ec_range_bytes(&enc_start_state);
         let nintra_bytes: u32 = ec_range_bytes(&enc_intra_state);
         // SAFETY: the encoder buffer holds at least nintra_bytes bytes.
-        let intra_buf: *mut u8 = unsafe { ec_get_buffer(&enc_intra_state).add(nstart_bytes as usize) };
+        let intra_buf: *mut u8 =
+            unsafe { ec_get_buffer(&enc_intra_state).add(nstart_bytes as usize) };
         let save_bytes: u32 = nintra_bytes - nstart_bytes;
         // (save_bytes == 0 is ALLOC_NONE in C; a zero-length alloc here.)
         let intra_bits = sg.alloc::<u8>(save_bytes as usize);
         /* Copy bits from intra bit-stream */
-        unsafe { core::ptr::copy_nonoverlapping(intra_buf, intra_bits.as_mut_ptr(), save_bytes as usize) };
+        unsafe {
+            core::ptr::copy_nonoverlapping(intra_buf, intra_bits.as_mut_ptr(), save_bytes as usize)
+        };
 
         *enc = enc_start_state;
 
         let badness2 = quant_coarse_energy_impl(
-            end, eBands, oldEBands, budget as i32, tell as i32,
-            &e_prob_model[intra as usize], error, enc, C, 0, max_decay,
+            end,
+            eBands,
+            oldEBands,
+            budget as i32,
+            tell as i32,
+            &e_prob_model[intra as usize],
+            error,
+            enc,
+            C,
+            0,
+            max_decay,
         );
 
         if two_pass != 0
@@ -230,7 +265,9 @@ pub fn quant_coarse_energy(
         {
             *enc = enc_intra_state;
             /* Copy intra bits to bit-stream */
-            unsafe { core::ptr::copy_nonoverlapping(intra_bits.as_ptr(), intra_buf, save_bytes as usize) };
+            unsafe {
+                core::ptr::copy_nonoverlapping(intra_bits.as_ptr(), intra_buf, save_bytes as usize)
+            };
             oldEBands[..nb].copy_from_slice(oldEBands_intra);
             error[..nb].copy_from_slice(error_intra);
             intra = 1;
@@ -271,7 +308,9 @@ pub fn quant_fine_energy(
         }
         for c in 0..C {
             let k = (i + c * modes::nbEBands) as usize;
-            let mut q2 = crate::celt::mathops::floor64(((error[k] * (1 << prev) as f32 + 0.5f32) * extra as f32) as f64) as i32;
+            let mut q2 = crate::celt::mathops::floor64(
+                ((error[k] * (1 << prev) as f32 + 0.5f32) * extra as f32) as f64,
+            ) as i32;
             if q2 > extra - 1 {
                 q2 = extra - 1;
             }
@@ -279,7 +318,8 @@ pub fn quant_fine_energy(
                 q2 = 0;
             }
             ec_enc_bits(enc, q2 as u32, eq as u32);
-            let mut offset: f32 = (q2 as f32 + 0.5f32) * (1 << (14 - eq)) as f32 * (1.0f32 / 16384.0) - 0.5f32;
+            let mut offset: f32 =
+                (q2 as f32 + 0.5f32) * (1 << (14 - eq)) as f32 * (1.0f32 / 16384.0) - 0.5f32;
             offset *= (1 << (14 - prev)) as f32 * (1.0f32 / 16384.0);
             oldEBands[k] += offset;
             error[k] -= offset;
@@ -312,7 +352,9 @@ pub fn quant_energy_finalise(
                 let k = (i + c * modes::nbEBands) as usize;
                 let q2: i32 = if error[k] < 0.0 { 0 } else { 1 };
                 ec_enc_bits(enc, q2 as u32, 1);
-                let offset: f32 = (q2 as f32 - 0.5f32) * (1 << (14 - fine_quant[i as usize] - 1)) as f32 * (1.0f32 / 16384.0);
+                let offset: f32 = (q2 as f32 - 0.5f32)
+                    * (1 << (14 - fine_quant[i as usize] - 1)) as f32
+                    * (1.0f32 / 16384.0);
                 oldEBands[k] += offset;
                 error[k] -= offset;
                 bits_left -= 1;

@@ -6,11 +6,13 @@
 
 use core::arch::wasm32::*;
 
-use super::mathops::EPSILON;
 use super::bands::SPREAD_NONE;
 use super::cwrs::encode_pulses;
 use super::entcode::{celt_udiv, ec_enc};
-use super::mathops::{celt_cos_norm, celt_atan2p_norm, celt_rcp, celt_rsqrt_norm, celt_rsqrt_norm32, celt_sqrt32};
+use super::mathops::{
+    EPSILON, celt_atan2p_norm, celt_cos_norm, celt_rcp, celt_rsqrt_norm, celt_rsqrt_norm32,
+    celt_sqrt32,
+};
 use super::pitch::celt_inner_prod;
 use crate::stack;
 
@@ -142,8 +144,13 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
     let y = st.alloc::<f32>(n + 8);
     let X = st.alloc::<f32>(n + 8);
     let signy = st.alloc::<i32>(n + 3);
-    let (py, pX, ps, piy, p_X) =
-        (y.as_mut_ptr(), X.as_mut_ptr(), signy.as_mut_ptr(), iy.as_mut_ptr(), _X.as_ptr());
+    let (py, pX, ps, piy, p_X) = (
+        y.as_mut_ptr(),
+        X.as_mut_ptr(),
+        signy.as_mut_ptr(),
+        iy.as_mut_ptr(),
+        _X.as_ptr(),
+    );
     let mut xy: f32;
     let mut yy: f32;
     let mut pulsesLeft: i32;
@@ -318,7 +325,16 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
 /// the pitch and a combination of pulses such that its norm is still equal
 /// to 1. This is the function that will typically require the most CPU.
 /// Returns a mask indicating which blocks in the band received pulses.
-pub fn alg_quant(X: &mut [f32], N: i32, K: i32, spread: i32, B: i32, enc: &mut ec_enc, gain: f32, resynth: i32) -> u32 {
+pub fn alg_quant(
+    X: &mut [f32],
+    N: i32,
+    K: i32,
+    spread: i32,
+    B: i32,
+    enc: &mut ec_enc,
+    gain: f32,
+    resynth: i32,
+) -> u32 {
     let st = stack::save();
 
     debug_assert!(K > 0, "alg_quant() needs at least one pulse");
@@ -370,5 +386,7 @@ pub fn stereo_itheta(X: &[f32], Y: &[f32], stereo: i32, N: i32) -> i32 {
     }
     let mid = celt_sqrt32(Emid);
     let side = celt_sqrt32(Eside);
-    crate::celt::mathops::floor64((0.5f32 + 65536.0f32 * 16384.0 * celt_atan2p_norm(side, mid)) as f64) as i32
+    crate::celt::mathops::floor64(
+        (0.5f32 + 65536.0f32 * 16384.0 * celt_atan2p_norm(side, mid)) as f64,
+    ) as i32
 }

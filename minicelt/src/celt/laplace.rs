@@ -7,7 +7,7 @@ use super::entenc::ec_encode_bin;
 const LAPLACE_LOG_MINP: i32 = 0;
 const LAPLACE_MINP: u32 = 1 << LAPLACE_LOG_MINP;
 /* The minimum number of guaranteed representable energy deltas (in one
-    direction). */
+direction). */
 const LAPLACE_NMIN: u32 = 16;
 
 /* When called, decay is positive and at most 11456. */
@@ -37,14 +37,19 @@ pub fn ec_laplace_encode(enc: &mut ec_enc, value: &mut i32, mut fs: u32, decay: 
         /* Everything beyond that has probability LAPLACE_MINP. */
         if fs == 0 {
             /* (32768-fl+LAPLACE_MINP-1) is unsigned in C, converted to int. */
-            let mut ndi_max = (32768u32.wrapping_sub(fl) + LAPLACE_MINP - 1) as i32 >> LAPLACE_LOG_MINP;
+            let mut ndi_max =
+                (32768u32.wrapping_sub(fl) + LAPLACE_MINP - 1) as i32 >> LAPLACE_LOG_MINP;
             ndi_max = (ndi_max - s) >> 1;
             let di = (val - i).min(ndi_max - 1);
             /* int added to unsigned */
             fl = fl.wrapping_add(((2 * di + 1 + s) * LAPLACE_MINP as i32) as u32);
             /* IMIN(int, unsigned) compares as unsigned */
             let rest = 32768u32.wrapping_sub(fl);
-            fs = if LAPLACE_MINP < rest { LAPLACE_MINP } else { rest };
+            fs = if LAPLACE_MINP < rest {
+                LAPLACE_MINP
+            } else {
+                rest
+            };
             *value = (i + di + s) ^ s;
         } else {
             fs += LAPLACE_MINP;

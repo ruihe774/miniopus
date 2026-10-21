@@ -8,8 +8,8 @@ use super::mathops::celt_sqrt;
 use crate::stack;
 
 /* Multiply-add a*b+c. With relaxed SIMD this may be fused (single rounding),
-   which is fine for these float kernels: like the SSE/NEON versions they do
-   not match the C summation order anyway. */
+which is fine for these float kernels: like the SSE/NEON versions they do
+not match the C summation order anyway. */
 #[cfg(target_feature = "relaxed-simd")]
 #[inline(always)]
 fn WASM_F32X4_MADD(a: v128, b: v128, c: v128) -> v128 {
@@ -30,8 +30,14 @@ unsafe fn ld(p: *const f32) -> v128 {
 /* Sums the lanes of a, b, c and d: returns {sum(a), sum(b), sum(c), sum(d)}. */
 #[inline(always)]
 fn wasm_f32x4_hadd4(a: v128, b: v128, c: v128, d: v128) -> v128 {
-    let ab = f32x4_add(i32x4_shuffle::<0, 4, 1, 5>(a, b), i32x4_shuffle::<2, 6, 3, 7>(a, b));
-    let cd = f32x4_add(i32x4_shuffle::<0, 4, 1, 5>(c, d), i32x4_shuffle::<2, 6, 3, 7>(c, d));
+    let ab = f32x4_add(
+        i32x4_shuffle::<0, 4, 1, 5>(a, b),
+        i32x4_shuffle::<2, 6, 3, 7>(a, b),
+    );
+    let cd = f32x4_add(
+        i32x4_shuffle::<0, 4, 1, 5>(c, d),
+        i32x4_shuffle::<2, 6, 3, 7>(c, d),
+    );
     f32x4_add(i64x2_shuffle::<0, 2>(ab, cd), i64x2_shuffle::<1, 3>(ab, cd))
 }
 
@@ -302,7 +308,8 @@ fn find_best_pitch(xcorr: &[f32], y: &[f32], len: i32, max_pitch: i32, best_pitc
 
 fn celt_fir5(x: &mut [f32], num: &[f32; 5], N: i32) {
     let [num0, num1, num2, num3, num4] = *num;
-    let (mut mem0, mut mem1, mut mem2, mut mem3, mut mem4) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let (mut mem0, mut mem1, mut mem2, mut mem3, mut mem4) =
+        (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
     for v in &mut x[..N as usize] {
         let mut sum: f32 = *v;
         sum = sum + num0 * mem0;
@@ -324,7 +331,15 @@ fn celt_fir5(x: &mut [f32], num: &[f32; 5], N: i32) {
 /// read in place: `hist[c*COMBFILTER_MAXPERIOD + j]` for `j < COMBFILTER_MAXPERIOD`, else
 /// `new[new_off + c*new_stride + j - COMBFILTER_MAXPERIOD]`. `x_lp` receives `len` downsampled,
 /// whitened samples. The decimation factor is 2 (the C `factor` argument, fixed for the one caller).
-pub fn pitch_downsample_factor2(hist: &[f32], new: &[f32], new_off: usize, new_stride: usize, x_lp: &mut [f32], len: i32, C: i32) {
+pub fn pitch_downsample_factor2(
+    hist: &[f32],
+    new: &[f32],
+    new_off: usize,
+    new_stride: usize,
+    x_lp: &mut [f32],
+    len: i32,
+    C: i32,
+) {
     debug_assert!(C == 1 || C == 2);
     const MP: usize = 1024; /* COMBFILTER_MAXPERIOD */
     let mut ac = [0.0f32; 5];

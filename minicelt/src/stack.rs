@@ -59,7 +59,19 @@ pub unsafe trait Pod: Copy {}
 macro_rules! pod {
     ($($t:ty),*) => { $(unsafe impl Pod for $t {})* };
 }
-pod!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, core::arch::wasm32::v128);
+pod!(
+    i8,
+    i16,
+    i32,
+    i64,
+    u8,
+    u16,
+    u32,
+    u64,
+    f32,
+    f64,
+    core::arch::wasm32::v128
+);
 unsafe impl<T: Pod, const N: usize> Pod for [T; N] {}
 
 /// SAVE_STACK; dropping it is RESTORE_STACK.
@@ -71,7 +83,10 @@ pub struct StackGuard {
 /// SAVE_STACK
 #[inline(always)]
 pub fn save() -> StackGuard {
-    StackGuard { saved: unsafe { *SCRATCH.top.get() }, _not_send: PhantomData }
+    StackGuard {
+        saved: unsafe { *SCRATCH.top.get() },
+        _not_send: PhantomData,
+    }
 }
 
 impl StackGuard {

@@ -47,7 +47,10 @@ pub fn _celt_autocorr(x: &[f32], ac: &mut [f32], lag: i32, n: i32) {
     celt_pitch_xcorr(x, x, ac, fastN, lag + 1);
     for k in 0..=lagu {
         let mut d: f32 = 0.0;
-        for (a, b) in x[k + fastN as usize..nu].iter().zip(&x[fastN as usize..nu - k]) {
+        for (a, b) in x[k + fastN as usize..nu]
+            .iter()
+            .zip(&x[fastN as usize..nu - k])
+        {
             d = d + a * b;
         }
         ac[k] += d;
