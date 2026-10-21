@@ -41,8 +41,8 @@ pub unsafe fn comb_filter(
     tapset0: i32,
     tapset1: i32,
 ) {
-    // UNSAFE-WIDE-PERF: only the `*x.offset(..)`/`*y.offset(..)` accesses and the `copy`/`comb_filter_const`
-    // calls need `unsafe`, not the gain setup.
+    // UNSAFE-PERF: see the function comment; nearly every statement is a raw-pointer access, the safe gain
+    // setup is a few lines, so narrowing the block would wrap each access.
     unsafe {
         if g0 == 0.0 && g1 == 0.0 {
             /* OPT: Happens to work without the OPUS_MOVE(), but only because the current encoder already copies x to y */

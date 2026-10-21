@@ -441,15 +441,13 @@ impl OpusEncoder {
         (VAD_NO_DECISION / peak energy vs noise energy) only reaches the DTX logic below, which
         needs digital silence: activity == 0 there. */
 
-        /* data += 1 for the range coder, which keeps a raw pointer into `data`: from here on
-        `data` is only accessed through `data_ptr`. The coder has the remaining 1275 bytes
-        (`ec_enc_shrink(enc, max_data_bytes - 1)` is then a no-op). */
+        /* data += 1 for the range coder, which keeps a raw pointer into `data`: `data[0]` (the TOC)
+        is only accessed before the pointer is taken and after the coder is done. The coder has the
+        remaining 1275 bytes (`ec_enc_shrink(enc, max_data_bytes - 1)` is then a no-op). */
+        data[0] = 0;
         let data_ptr = data.as_mut_ptr();
-        // UNSAFE-EASY: derive/implement `Default` (or a const `new_zeroed`) for `ec_enc`; zero is valid for every field.
-        let mut enc: ec_enc = unsafe { core::mem::zeroed() };
-        // SAFETY: data has PACKET_SIZE_CAP bytes.
-        // UNSAFE-EASY: `data_ptr.wrapping_add(1)` is safe (`ec_enc_init` itself is a safe fn).
-        unsafe { ec_enc_init(&mut enc, data_ptr.add(1), (PACKET_SIZE_CAP - 1) as u32) };
+        let mut enc = ec_enc::new_zeroed();
+        ec_enc_init(&mut enc, data_ptr.wrapping_add(1), (PACKET_SIZE_CAP - 1) as u32);
 
         /* No delay_buffer prefix: total_buffer == 0. The variable HP smoothing only feeds
         the VOIP high-pass. */
@@ -503,9 +501,6 @@ impl OpusEncoder {
             }
         }
 
-        // SAFETY (data_ptr accesses below): data_ptr[0..2] lies within `data`.
-        // UNSAFE-EASY: do `data[0] = 0` before taking `data_ptr` (the coder starts at byte 1).
-        unsafe { *data_ptr = 0 };
         self.celt_enc.constrained_vbr = self.vbr_constraint;
         self.celt_enc.bitrate = bitrate_bps;
 
@@ -518,8 +513,7 @@ impl OpusEncoder {
 
         /* Signalling the mode in the first byte */
         let toc = celt_toc(self.bandwidth, self.stream_channels);
-        // UNSAFE-EASY: `data[0] |= toc` once the coder is done (`enc` is then only used by a debug_assert on counters).
-        unsafe { *data_ptr |= toc };
+        data[0] |= toc;
 
         self.first = 0;
 
@@ -534,8 +528,7 @@ impl OpusEncoder {
                 {
                     /* Valid frame for DTX! */
                     self.rangeFinal = 0;
-                    // UNSAFE-EASY: `data[0] = toc`, see above.
-                    unsafe { *data_ptr = toc };
+                    data[0] = toc;
                     return 1;
                 } else {
                     self.nb_no_activity_ms_Q1 = NB_SPEECH_FRAMES_BEFORE_DTX * 20 * 2;

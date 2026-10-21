@@ -234,9 +234,7 @@ pub fn quant_coarse_energy(
         let nstart_bytes: u32 = ec_range_bytes(&enc_start_state);
         let nintra_bytes: u32 = ec_range_bytes(&enc_intra_state);
         // SAFETY: the encoder buffer holds at least nintra_bytes bytes.
-        // UNSAFE-EASY: `wrapping_add` is safe (the pointer is only dereferenced in the copies below).
-        let intra_buf: *mut u8 =
-            unsafe { ec_get_buffer(&enc_intra_state).add(nstart_bytes as usize) };
+        let intra_buf: *mut u8 = ec_get_buffer(&enc_intra_state).wrapping_add(nstart_bytes as usize);
         let save_bytes: u32 = nintra_bytes - nstart_bytes;
         // (save_bytes == 0 is ALLOC_NONE in C; a zero-length alloc here.)
         let intra_bits = sg.alloc::<u8>(save_bytes as usize);

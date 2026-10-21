@@ -39,6 +39,26 @@ pub struct ec_ctx {
     pub error: i32,
 }
 
+impl ec_ctx {
+    /// All-zero context (null buffer); `ec_enc_init` sets it up.
+    pub const fn new_zeroed() -> Self {
+        ec_ctx {
+            buf: core::ptr::null_mut(),
+            storage: 0,
+            end_offs: 0,
+            end_window: 0,
+            nend_bits: 0,
+            nbits_total: 0,
+            offs: 0,
+            rng: 0,
+            val: 0,
+            ext: 0,
+            rem: 0,
+            error: 0,
+        }
+    }
+}
+
 pub type ec_enc = ec_ctx;
 
 /// EC_ILOG: number of bits needed to represent `v` (C: undefined for 0; 0 here).

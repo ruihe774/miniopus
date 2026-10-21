@@ -16,6 +16,7 @@
 #![no_std]
 
 use core::ptr::addr_of_mut;
+use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use minicelt::opus::encoder::OpusEncoder;
 
 const FRAME: usize = 960;
@@ -25,7 +26,7 @@ const OUT_CAP: usize = minicelt::opus::encoder::PACKET_SIZE_CAP;
 const IN_BUF_FRAME: usize = minicelt::opus::encoder::IN_BUF_FRAME as usize;
 
 static mut ENCODER: OpusEncoder = OpusEncoder::new_zeroed();
-static mut CHANNELS: usize = 0;
+static CHANNELS: AtomicUsize = AtomicUsize::new(0);
 /// The input buffer (the first `960 * channels` samples); also the encoder's working memory
 /// (room for `120` more samples per channel), and the i16 input is converted in place.
 static mut INPUT: [f32; IN_BUF_FRAME * MAX_CHANNELS] = [0.0; IN_BUF_FRAME * MAX_CHANNELS];
@@ -43,15 +44,23 @@ fn enc() -> &'static mut OpusEncoder {
     unsafe { &mut *addr_of_mut!(ENCODER) }
 }
 
+fn input() -> &'static mut [f32; IN_BUF_FRAME * MAX_CHANNELS] {
+    // UNSAFE-MAND: `&mut` to a `static mut`.
+    unsafe { &mut *addr_of_mut!(INPUT) }
+}
+
+fn output() -> &'static mut [u8; OUT_CAP] {
+    // UNSAFE-MAND: `&mut` to a `static mut`.
+    unsafe { &mut *addr_of_mut!(OUTPUT) }
+}
+
 fn channels() -> usize {
-    // UNSAFE-EASY: make CHANNELS an `AtomicUsize` (relaxed), here and in `minicelt_init`.
-    unsafe { *addr_of_mut!(CHANNELS) }
+    CHANNELS.load(Relaxed)
 }
 
 #[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_init(channels: i32, bitrate: i32, complexity: i32, vbr_constraint: i32, dtx: i32) -> i32 {
-    // UNSAFE-EASY: `AtomicUsize` store, see `channels`.
-    unsafe { *addr_of_mut!(CHANNELS) = 0 };
+    CHANNELS.store(0, Relaxed);
     let e = enc();
     let mut r = e.init(channels);
     if r >= 0 {
@@ -68,8 +77,7 @@ pub extern "C" fn minicelt_init(channels: i32, bitrate: i32, complexity: i32, vb
     }
     // Leave the encoder unusable unless every setting was accepted.
     if r >= 0 {
-        // UNSAFE-EASY: `AtomicUsize` store, see `channels`.
-        unsafe { *addr_of_mut!(CHANNELS) = channels as usize };
+        CHANNELS.store(channels as usize, Relaxed);
     }
     r
 }
@@ -125,8 +133,7 @@ pub extern "C" fn minicelt_encode() -> i32 {
     if channels() == 0 {
         return -1; /* OPUS_BAD_ARG: not initialised */
     }
-    // UNSAFE-WIDE-MAND: only the two `&mut *addr_of_mut!(..)` derefs of the statics need `unsafe`.
-    unsafe { enc().encode_float(&mut *addr_of_mut!(INPUT), &mut *addr_of_mut!(OUTPUT), 24) }
+    enc().encode_float(input(), output(), 24)
 }
 
 /// Encodes `960 * channels` interleaved samples from `minicelt_input_i16_ptr()` (opus_encode:
@@ -137,17 +144,15 @@ pub extern "C" fn minicelt_encode_i16() -> i32 {
     if n == 0 {
         return -1; /* OPUS_BAD_ARG: not initialised */
     }
-    // UNSAFE-WIDE-MAND: the `&mut *addr_of_mut!(..)` derefs of the statics in the last line need `unsafe`; the in-place
-    // i16 -> f32 loop is UNSAFE-EASY (read the i16 out of the f32 word `i / 2` with `to_bits`, going from the end).
-    unsafe {
-        let f = addr_of_mut!(INPUT) as *mut f32;
-        let q = f as *const i16;
-        /* in place, from the end: f[i] (4 bytes at 4i) only overwrites i16 samples already read */
-        for i in (0..n).rev() {
-            *f.add(i) = *q.add(i) as f32 * (1.0f32 / 32768.0f32);
-        }
-        enc().encode_float(&mut *addr_of_mut!(INPUT), &mut *addr_of_mut!(OUTPUT), 16)
+    let f = input();
+    /* in place, from the end: f[i] (word i) only overwrites i16 samples (in word i / 2, little
+    endian) that were already read */
+    for i in (0..n).rev() {
+        let w = f[i / 2].to_bits();
+        let q = if i % 2 == 0 { w as u16 } else { (w >> 16) as u16 };
+        f[i] = q as i16 as f32 * (1.0f32 / 32768.0f32);
     }
+    enc().encode_float(f, output(), 16)
 }
 
 /// OPUS_GET_LOOKAHEAD: Fs/400 samples (no delay compensation for RESTRICTED_CELT).

@@ -55,11 +55,11 @@ pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
     debug_assert!(x.len() >= n && y.len() >= n);
     let (px, py) = (x.as_ptr(), y.as_ptr());
     // SAFETY: every vector load reads 4 floats at an index i with i + 4 <= n.
-    // UNSAFE-WIDE-PERF: only the `ld` calls (unchecked pointer loads) need `unsafe`, not the hsum or the scalar tail.
+    let mut i = 0usize;
+    let mut sum0 = f32x4_splat(0.0);
+    let mut sum1 = f32x4_splat(0.0);
+    // UNSAFE-PERF: unchecked pointer loads instead of bounds-checked slices.
     unsafe {
-        let mut i = 0usize;
-        let mut sum0 = f32x4_splat(0.0);
-        let mut sum1 = f32x4_splat(0.0);
         while i + 7 < n {
             sum0 = WASM_F32X4_MADD(ld(px.add(i)), ld(py.add(i)), sum0);
             sum1 = WASM_F32X4_MADD(ld(px.add(i + 4)), ld(py.add(i + 4)), sum1);
@@ -69,12 +69,12 @@ pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
             sum0 = WASM_F32X4_MADD(ld(px.add(i)), ld(py.add(i)), sum0);
             i += 4;
         }
-        let mut xy = wasm_f32x4_hsum(f32x4_add(sum0, sum1));
-        for (a, b) in x[i..n].iter().zip(&y[i..n]) {
-            xy = xy + a * b;
-        }
-        xy
     }
+    let mut xy = wasm_f32x4_hsum(f32x4_add(sum0, sum1));
+    for (a, b) in x[i..n].iter().zip(&y[i..n]) {
+        xy = xy + a * b;
+    }
+    xy
 }
 
 /* Returns {sum_j x[j]*y[j+k], k=0..3}. Reads y[0..len+2]. */
@@ -174,13 +174,13 @@ pub fn dual_inner_prod(x: &[f32], y01: &[f32], y02: &[f32], N: i32, xy1: &mut f3
     debug_assert!(x.len() >= n && y01.len() >= n && y02.len() >= n);
     let (px, p1, p2) = (x.as_ptr(), y01.as_ptr(), y02.as_ptr());
     // SAFETY: every vector load reads 4 floats at an index i with i + 4 <= n.
-    // UNSAFE-WIDE-PERF: only the `ld` calls (unchecked pointer loads) need `unsafe`, not the hsums or the scalar tail.
+    let mut i = 0usize;
+    let mut sum1a = f32x4_splat(0.0);
+    let mut sum1b = sum1a;
+    let mut sum2a = sum1a;
+    let mut sum2b = sum1a;
+    // UNSAFE-PERF: unchecked pointer loads instead of bounds-checked slices.
     unsafe {
-        let mut i = 0usize;
-        let mut sum1a = f32x4_splat(0.0);
-        let mut sum1b = sum1a;
-        let mut sum2a = sum1a;
-        let mut sum2b = sum1a;
         while i + 7 < n {
             let xi = ld(px.add(i));
             let xi4 = ld(px.add(i + 4));
@@ -196,16 +196,16 @@ pub fn dual_inner_prod(x: &[f32], y01: &[f32], y02: &[f32], N: i32, xy1: &mut f3
             sum2a = WASM_F32X4_MADD(xi, ld(p2.add(i)), sum2a);
             i += 4;
         }
-        let mut xy01 = wasm_f32x4_hsum(f32x4_add(sum1a, sum1b));
-        let mut xy02 = wasm_f32x4_hsum(f32x4_add(sum2a, sum2b));
-        let (xt, y1t, y2t) = (&x[i..n], &y01[i..n], &y02[i..n]);
-        for j in 0..xt.len() {
-            xy01 = xy01 + xt[j] * y1t[j];
-            xy02 = xy02 + xt[j] * y2t[j];
-        }
-        *xy1 = xy01;
-        *xy2 = xy02;
     }
+    let mut xy01 = wasm_f32x4_hsum(f32x4_add(sum1a, sum1b));
+    let mut xy02 = wasm_f32x4_hsum(f32x4_add(sum2a, sum2b));
+    let (xt, y1t, y2t) = (&x[i..n], &y01[i..n], &y02[i..n]);
+    for j in 0..xt.len() {
+        xy01 = xy01 + xt[j] * y1t[j];
+        xy02 = xy02 + xt[j] * y2t[j];
+    }
+    *xy1 = xy01;
+    *xy2 = xy02;
 }
 
 /// `comb_filter_const_wasm`: y[i] = x[i] + g10*x[i-T] + g11*(x[i-T+1]+x[i-T-1])

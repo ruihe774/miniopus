@@ -49,23 +49,24 @@ static TABLES: Tables = Tables(core::cell::UnsafeCell::new(FftTables {
 }));
 
 #[inline(always)]
-fn twiddles() -> &'static [kiss_twiddle_cpx; 480] {
+fn tables() -> &'static FftTables {
     // SAFETY: init_fft ran before the first encode; the tables are only read afterwards.
     // UNSAFE-MAND: reading through the `UnsafeCell` static (the tables are filled at runtime).
-    unsafe { &(*TABLES.0.get()).twiddles }
+    unsafe { &*TABLES.0.get() }
+}
+
+#[inline(always)]
+fn twiddles() -> &'static [kiss_twiddle_cpx; 480] {
+    &tables().twiddles
 }
 
 /// Bit-reversal table of the FFT with the given MDCT shift (0: 480 points, 3: 60 points).
 #[inline(always)]
 pub fn bitrev(shift: i32) -> &'static [i16] {
-    // SAFETY: as `twiddles`.
-    // UNSAFE-WIDE-MAND: only the two `&(*TABLES.0.get()).bitrevNN` derefs need `unsafe`, not the `if`.
-    unsafe {
-        if shift == 0 {
-            &(*TABLES.0.get()).bitrev480
-        } else {
-            &(*TABLES.0.get()).bitrev60
-        }
+    if shift == 0 {
+        &tables().bitrev480
+    } else {
+        &tables().bitrev60
     }
 }
 
