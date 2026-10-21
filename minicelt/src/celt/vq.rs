@@ -8,7 +8,7 @@ use core::arch::wasm32::*;
 
 use super::bands::SPREAD_NONE;
 use super::cwrs::encode_pulses;
-use super::simd::{hsum_f32, hsum_i32, laneselect, madd, trunc_i32};
+use super::simd::{hsum_f32, hsum_i32, laneselect, madd, max4, trunc_i32};
 use super::entcode::{celt_udiv, ec_enc};
 use super::mathops::{EPSILON, atan2p_norm, cos_norm, floor64, rcp, rsqrt, sqrt};
 use super::pitch::celt_inner_prod;
@@ -249,16 +249,16 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
                 count = i32x4_add(count, i32x4_splat(4));
                 pos1 = laneselect(count, pos1, f32x4_gt(r1, best1));
                 count = i32x4_add(count, i32x4_splat(4));
-                best0 = f32x4_pmax(best0, r0);
-                best1 = f32x4_pmax(best1, r1);
+                best0 = max4(best0, r0);
+                best1 = max4(best1, r1);
                 j += 8;
             }
             /* Merge the two sets, keeping the lowest index on ties. */
             pos0 = laneselect(pos1, pos0, f32x4_gt(best1, best0));
-            best0 = f32x4_pmax(best0, best1);
+            best0 = max4(best0, best1);
             /* Horizontal max */
-            let mut max = f32x4_pmax(best0, i64x2_shuffle::<1, 0>(best0, best0));
-            max = f32x4_pmax(max, i32x4_shuffle::<1, 0, 3, 2>(max, max));
+            let mut max = max4(best0, i64x2_shuffle::<1, 0>(best0, best0));
+            max = max4(max, i32x4_shuffle::<1, 0, 3, 2>(max, max));
             /* Among the lanes that reach the global max, pick the lowest index,
             like the C code does. */
             pos0 = laneselect(pos0, i32x4_splat(0x7fffffff), f32x4_eq(best0, max));

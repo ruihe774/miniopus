@@ -46,6 +46,35 @@ pub fn trunc_i32(a: v128) -> v128 {
     i32x4_trunc_sat_f32x4(a)
 }
 
+/// Lane-wise maximum. With relaxed SIMD the result is implementation-defined when a lane is NaN or
+/// the operands are zeros of opposite sign (one native `maxps`/`fmax`); otherwise it is the plain
+/// `a < b ? b : a`, which is what the plain `f32x4_pmax` computes. The caller guarantees no NaN, and
+/// that a +-0 tie cannot change its result.
+#[cfg(target_feature = "relaxed-simd")]
+#[inline(always)]
+pub fn max4(a: v128, b: v128) -> v128 {
+    f32x4_relaxed_max(a, b)
+}
+
+#[cfg(not(target_feature = "relaxed-simd"))]
+#[inline(always)]
+pub fn max4(a: v128, b: v128) -> v128 {
+    f32x4_pmax(a, b)
+}
+
+/// Lane-wise minimum, the counterpart of [`max4`] (plain: `f32x4_pmin`, `b < a ? b : a`).
+#[cfg(target_feature = "relaxed-simd")]
+#[inline(always)]
+pub fn min4(a: v128, b: v128) -> v128 {
+    f32x4_relaxed_min(a, b)
+}
+
+#[cfg(not(target_feature = "relaxed-simd"))]
+#[inline(always)]
+pub fn min4(a: v128, b: v128) -> v128 {
+    f32x4_pmin(a, b)
+}
+
 /// Unaligned 4-float load. The caller guarantees `p[0..4]` is readable.
 // UNSAFE-MAND: `v128_load` is an unsafe intrinsic (a safe load would need a bounds-checked copy or `f32x4(..)`).
 #[inline(always)]

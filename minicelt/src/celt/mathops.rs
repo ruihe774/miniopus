@@ -1,8 +1,8 @@
 //! Port of celt/mathops.h and celt/mathops.c (float build, without FLOAT_APPROX).
 
-use super::simd::trunc_i32;
+use super::simd::{max4, min4, trunc_i32};
 use core::arch::wasm32::{
-    f32x4_add, f32x4_demote_f64x2_zero, f32x4_extract_lane, f32x4_neg, f32x4_pmax, f32x4_pmin,
+    f32x4_add, f32x4_demote_f64x2_zero, f32x4_extract_lane, f32x4_neg,
     f32x4_splat, f64x2_add, f64x2_convert_low_i32x4, f64x2_div, f64x2_extract_lane, f64x2_floor,
     f64x2_mul, f64x2_promote_low_f32x4, f64x2_splat, f64x2_sqrt, f64x2_sub, i32x4_shuffle,
     i64x2_add, i64x2_extend_low_i32x4, i64x2_shl, i64x2_shuffle,
@@ -52,8 +52,8 @@ pub fn floor64(x: f64) -> f64 {
 /// PI from celt/mathops.h (a double constant).
 pub const PI: f64 = 3.1415926535897931;
 
-/// C celt_maxabs16, celt_maxabs_res. Vectorized: `f32x4_pmax(v, acc)` is `acc > v ? acc : v`, i.e.
-/// `fmax(acc, v)` (and `f32x4_pmin(v, acc)` is `fmin(acc, v)`), and the extrema do not depend on the
+/// C celt_maxabs16, celt_maxabs_res. Vectorized: `max4(v, acc)` is `acc > v ? acc : v`, i.e.
+/// `fmax(acc, v)` (and `min4(v, acc)` is `fmin(acc, v)`), and the extrema do not depend on the
 /// order, so the result is that of the scalar loop for any input without NaN (up to the sign of a
 /// zero result, which is only compared).
 pub fn maxabs(x: &[f32]) -> f32 {
@@ -70,14 +70,14 @@ pub fn maxabs(x: &[f32]) -> f32 {
                 v128_load(c[4..].as_ptr() as *const v128),
             )
         };
-        max0 = f32x4_pmax(v0, max0);
-        max1 = f32x4_pmax(v1, max1);
-        min0 = f32x4_pmin(v0, min0);
-        min1 = f32x4_pmin(v1, min1);
+        max0 = max4(v0, max0);
+        max1 = max4(v1, max1);
+        min0 = min4(v0, min0);
+        min1 = min4(v1, min1);
     }
-    let m = f32x4_pmax(f32x4_pmax(max0, max1), f32x4_neg(f32x4_pmin(min0, min1)));
-    let m = f32x4_pmax(m, i64x2_shuffle::<1, 0>(m, m));
-    let m = f32x4_pmax(m, i32x4_shuffle::<1, 0, 3, 2>(m, m));
+    let m = max4(max4(max0, max1), f32x4_neg(min4(min0, min1)));
+    let m = max4(m, i64x2_shuffle::<1, 0>(m, m));
+    let m = max4(m, i32x4_shuffle::<1, 0, 3, 2>(m, m));
     let mut maxval = f32x4_extract_lane::<0>(m);
     for &v in tail {
         maxval = fmax(maxval, v);
