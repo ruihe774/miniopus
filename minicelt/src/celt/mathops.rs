@@ -1,10 +1,11 @@
 //! Port of celt/mathops.h and celt/mathops.c (float build, without FLOAT_APPROX).
 
+use super::simd::trunc_i32;
 use core::arch::wasm32::{
     f32x4_add, f32x4_demote_f64x2_zero, f32x4_extract_lane, f32x4_neg, f32x4_pmax, f32x4_pmin,
     f32x4_splat, f64x2_add, f64x2_convert_low_i32x4, f64x2_div, f64x2_extract_lane, f64x2_floor,
     f64x2_mul, f64x2_promote_low_f32x4, f64x2_splat, f64x2_sqrt, f64x2_sub, i32x4_shuffle,
-    i32x4_trunc_sat_f32x4, i64x2_add, i64x2_extend_low_i32x4, i64x2_shl, i64x2_shuffle,
+    i64x2_add, i64x2_extend_low_i32x4, i64x2_shl, i64x2_shuffle,
     i64x2_splat, v128, v128_load,
 };
 
@@ -251,7 +252,7 @@ pub fn exp2x2(x: v128) -> v128 {
         -1.65339022054652515390e-06,
         4.13813679705723846039e-08,
     ];
-    let k = i32x4_trunc_sat_f32x4(f32x4_add(x, f32x4_splat(0.5)));
+    let k = trunc_i32(f32x4_add(x, f32x4_splat(0.5)));
     let dk = f64x2_convert_low_i32x4(k);
     let hi = f64x2_sub(
         f64x2_mul(

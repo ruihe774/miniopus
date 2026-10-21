@@ -23,9 +23,10 @@ use super::rate::clt_compute_allocation;
 use crate::celt::mathops::{fmax, fmin, imax, imin};
 use crate::opus::defines::OPUS_INTERNAL_ERROR;
 use crate::stack;
+use super::simd::{madd, trunc_i32};
 use core::arch::wasm32::{
     f32x4, f32x4_add, f32x4_floor, f32x4_mul, f32x4_pmin, f32x4_splat, i32x4_extract_lane,
-    i32x4_trunc_sat_f32x4, i64x2_shuffle, u32x4_extract_lane, u32x4_min, u32x4_splat,
+    i64x2_shuffle, u32x4_extract_lane, u32x4_min, u32x4_splat,
     u32x4_trunc_sat_f32x4,
 };
 
@@ -988,8 +989,8 @@ pub fn dynalloc_analysis(
             let x = f32x4_pmin(f32x4_splat(4.0), f32x4(x[0], x[1], x[2], x[3]));
             let e = exp2x2(x);
             let e = i64x2_shuffle::<0, 2>(e, exp2x2(i64x2_shuffle::<1, 1>(x, x)));
-            let y = f32x4_add(f32x4_splat(0.5), f32x4_mul(f32x4_splat(13.0), e));
-            let y = i32x4_trunc_sat_f32x4(f32x4_floor(y));
+            let y = madd(f32x4_splat(13.0), e, f32x4_splat(0.5));
+            let y = trunc_i32(f32x4_floor(y));
             *o = [
                 i32x4_extract_lane::<0>(y),
                 i32x4_extract_lane::<1>(y),
