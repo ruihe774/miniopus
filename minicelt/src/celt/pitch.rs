@@ -6,50 +6,8 @@ use core::arch::wasm32::*;
 
 use super::celt_lpc::{_celt_autocorr, _celt_lpc};
 use super::mathops::sqrt;
+use super::simd::{hadd4, hsum_f32, ld, madd};
 use crate::stack;
-
-/* Multiply-add a*b+c. With relaxed SIMD this may be fused (single rounding),
-which is fine for these float kernels: like the SSE/NEON versions they do
-not match the C summation order anyway. */
-#[cfg(target_feature = "relaxed-simd")]
-#[inline(always)]
-fn WASM_F32X4_MADD(a: v128, b: v128, c: v128) -> v128 {
-    f32x4_relaxed_madd(a, b, c)
-}
-
-#[cfg(not(target_feature = "relaxed-simd"))]
-#[inline(always)]
-fn WASM_F32X4_MADD(a: v128, b: v128, c: v128) -> v128 {
-    f32x4_add(f32x4_mul(a, b), c)
-}
-
-/// Unaligned 4-float load. The caller guarantees `p[0..4]` is readable.
-// UNSAFE-MAND: `v128_load` is an unsafe intrinsic (a safe load would need a bounds-checked copy or `f32x4(..)`).
-#[inline(always)]
-unsafe fn ld(p: *const f32) -> v128 {
-    unsafe { v128_load(p as *const v128) }
-}
-
-/* Sums the lanes of a, b, c and d: returns {sum(a), sum(b), sum(c), sum(d)}. */
-#[inline(always)]
-fn wasm_f32x4_hadd4(a: v128, b: v128, c: v128, d: v128) -> v128 {
-    let ab = f32x4_add(
-        i32x4_shuffle::<0, 4, 1, 5>(a, b),
-        i32x4_shuffle::<2, 6, 3, 7>(a, b),
-    );
-    let cd = f32x4_add(
-        i32x4_shuffle::<0, 4, 1, 5>(c, d),
-        i32x4_shuffle::<2, 6, 3, 7>(c, d),
-    );
-    f32x4_add(i64x2_shuffle::<0, 2>(ab, cd), i64x2_shuffle::<1, 3>(ab, cd))
-}
-
-#[inline(always)]
-fn wasm_f32x4_hsum(a: v128) -> f32 {
-    let a = f32x4_add(a, i64x2_shuffle::<1, 0>(a, a));
-    let a = f32x4_add(a, i32x4_shuffle::<1, 0, 3, 2>(a, a));
-    f32x4_extract_lane::<0>(a)
-}
 
 pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
     let n = imax(N, 0) as usize;
@@ -62,16 +20,16 @@ pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
     // UNSAFE-PERF: unchecked pointer loads instead of bounds-checked slices.
     unsafe {
         while i + 7 < n {
-            sum0 = WASM_F32X4_MADD(ld(px.add(i)), ld(py.add(i)), sum0);
-            sum1 = WASM_F32X4_MADD(ld(px.add(i + 4)), ld(py.add(i + 4)), sum1);
+            sum0 = madd(ld(px.add(i)), ld(py.add(i)), sum0);
+            sum1 = madd(ld(px.add(i + 4)), ld(py.add(i + 4)), sum1);
             i += 8;
         }
         if i + 3 < n {
-            sum0 = WASM_F32X4_MADD(ld(px.add(i)), ld(py.add(i)), sum0);
+            sum0 = madd(ld(px.add(i)), ld(py.add(i)), sum0);
             i += 4;
         }
     }
-    let mut xy = wasm_f32x4_hsum(f32x4_add(sum0, sum1));
+    let mut xy = hsum_f32(f32x4_add(sum0, sum1));
     for (a, b) in x[i..n].iter().zip(&y[i..n]) {
         xy = xy + a * b;
     }
@@ -92,15 +50,15 @@ unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
         let mut j = 0usize;
         while j + 3 < len {
             let xj = ld(x.add(j));
-            sum0 = WASM_F32X4_MADD(i32x4_shuffle::<0, 0, 0, 0>(xj, xj), ld(y.add(j)), sum0);
-            sum1 = WASM_F32X4_MADD(i32x4_shuffle::<1, 1, 1, 1>(xj, xj), ld(y.add(j + 1)), sum1);
-            sum2 = WASM_F32X4_MADD(i32x4_shuffle::<2, 2, 2, 2>(xj, xj), ld(y.add(j + 2)), sum2);
-            sum3 = WASM_F32X4_MADD(i32x4_shuffle::<3, 3, 3, 3>(xj, xj), ld(y.add(j + 3)), sum3);
+            sum0 = madd(i32x4_shuffle::<0, 0, 0, 0>(xj, xj), ld(y.add(j)), sum0);
+            sum1 = madd(i32x4_shuffle::<1, 1, 1, 1>(xj, xj), ld(y.add(j + 1)), sum1);
+            sum2 = madd(i32x4_shuffle::<2, 2, 2, 2>(xj, xj), ld(y.add(j + 2)), sum2);
+            sum3 = madd(i32x4_shuffle::<3, 3, 3, 3>(xj, xj), ld(y.add(j + 3)), sum3);
             j += 4;
         }
         let mut sum = f32x4_add(f32x4_add(sum0, sum1), f32x4_add(sum2, sum3));
         while j < len {
-            sum = WASM_F32X4_MADD(f32x4_splat(*x.add(j)), ld(y.add(j)), sum);
+            sum = madd(f32x4_splat(*x.add(j)), ld(y.add(j)), sum);
             j += 1;
         }
         sum
@@ -135,22 +93,22 @@ pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max
             let mut j = 0usize;
             while j + 3 < len {
                 let xj = ld(px.add(j));
-                sum0 = WASM_F32X4_MADD(xj, ld(y.add(j)), sum0);
-                sum1 = WASM_F32X4_MADD(xj, ld(y.add(j + 1)), sum1);
-                sum2 = WASM_F32X4_MADD(xj, ld(y.add(j + 2)), sum2);
-                sum3 = WASM_F32X4_MADD(xj, ld(y.add(j + 3)), sum3);
-                sum4 = WASM_F32X4_MADD(xj, ld(y.add(j + 4)), sum4);
-                sum5 = WASM_F32X4_MADD(xj, ld(y.add(j + 5)), sum5);
-                sum6 = WASM_F32X4_MADD(xj, ld(y.add(j + 6)), sum6);
-                sum7 = WASM_F32X4_MADD(xj, ld(y.add(j + 7)), sum7);
+                sum0 = madd(xj, ld(y.add(j)), sum0);
+                sum1 = madd(xj, ld(y.add(j + 1)), sum1);
+                sum2 = madd(xj, ld(y.add(j + 2)), sum2);
+                sum3 = madd(xj, ld(y.add(j + 3)), sum3);
+                sum4 = madd(xj, ld(y.add(j + 4)), sum4);
+                sum5 = madd(xj, ld(y.add(j + 5)), sum5);
+                sum6 = madd(xj, ld(y.add(j + 6)), sum6);
+                sum7 = madd(xj, ld(y.add(j + 7)), sum7);
                 j += 4;
             }
-            let mut lo = wasm_f32x4_hadd4(sum0, sum1, sum2, sum3);
-            let mut hi = wasm_f32x4_hadd4(sum4, sum5, sum6, sum7);
+            let mut lo = hadd4(sum0, sum1, sum2, sum3);
+            let mut hi = hadd4(sum4, sum5, sum6, sum7);
             while j < len {
                 let xj = f32x4_splat(*px.add(j));
-                lo = WASM_F32X4_MADD(xj, ld(y.add(j)), lo);
-                hi = WASM_F32X4_MADD(xj, ld(y.add(j + 4)), hi);
+                lo = madd(xj, ld(y.add(j)), lo);
+                hi = madd(xj, ld(y.add(j + 4)), hi);
                 j += 1;
             }
             v128_store(po.add(i) as *mut v128, lo);
@@ -185,21 +143,21 @@ pub fn dual_inner_prod(x: &[f32], y01: &[f32], y02: &[f32], N: i32, xy1: &mut f3
         while i + 7 < n {
             let xi = ld(px.add(i));
             let xi4 = ld(px.add(i + 4));
-            sum1a = WASM_F32X4_MADD(xi, ld(p1.add(i)), sum1a);
-            sum2a = WASM_F32X4_MADD(xi, ld(p2.add(i)), sum2a);
-            sum1b = WASM_F32X4_MADD(xi4, ld(p1.add(i + 4)), sum1b);
-            sum2b = WASM_F32X4_MADD(xi4, ld(p2.add(i + 4)), sum2b);
+            sum1a = madd(xi, ld(p1.add(i)), sum1a);
+            sum2a = madd(xi, ld(p2.add(i)), sum2a);
+            sum1b = madd(xi4, ld(p1.add(i + 4)), sum1b);
+            sum2b = madd(xi4, ld(p2.add(i + 4)), sum2b);
             i += 8;
         }
         if i + 3 < n {
             let xi = ld(px.add(i));
-            sum1a = WASM_F32X4_MADD(xi, ld(p1.add(i)), sum1a);
-            sum2a = WASM_F32X4_MADD(xi, ld(p2.add(i)), sum2a);
+            sum1a = madd(xi, ld(p1.add(i)), sum1a);
+            sum2a = madd(xi, ld(p2.add(i)), sum2a);
             i += 4;
         }
     }
-    let mut xy01 = wasm_f32x4_hsum(f32x4_add(sum1a, sum1b));
-    let mut xy02 = wasm_f32x4_hsum(f32x4_add(sum2a, sum2b));
+    let mut xy01 = hsum_f32(f32x4_add(sum1a, sum1b));
+    let mut xy02 = hsum_f32(f32x4_add(sum2a, sum2b));
     let (xt, y1t, y2t) = (&x[i..n], &y01[i..n], &y02[i..n]);
     for j in 0..xt.len() {
         xy01 = xy01 + xt[j] * y1t[j];

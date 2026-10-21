@@ -8,6 +8,7 @@ use core::arch::wasm32::*;
 
 use super::bands::SPREAD_NONE;
 use super::cwrs::encode_pulses;
+use super::simd::{hsum_f32, hsum_i32, laneselect, trunc_i32};
 use super::entcode::{celt_udiv, ec_enc};
 use super::mathops::{EPSILON, atan2p_norm, cos_norm, floor64, rcp, rsqrt, sqrt};
 use super::pitch::celt_inner_prod;
@@ -103,35 +104,6 @@ fn extract_collapse_mask(iy: &[i32], N: i32, B: i32) -> u32 {
     collapse_mask
 }
 
-/* With relaxed SIMD, use the single-instruction lane select (e.g. blendvps
-on x86). Every mask passed to it is a comparison result, i.e. all-ones or
-all-zeros per lane, for which relaxed_laneselect is fully defined. */
-#[cfg(target_feature = "relaxed-simd")]
-#[inline(always)]
-fn WASM_LANESELECT(a: v128, b: v128, m: v128) -> v128 {
-    i32x4_relaxed_laneselect(a, b, m)
-}
-
-#[cfg(not(target_feature = "relaxed-simd"))]
-#[inline(always)]
-fn WASM_LANESELECT(a: v128, b: v128, m: v128) -> v128 {
-    v128_bitselect(a, b, m)
-}
-
-#[inline(always)]
-fn wasm_f32x4_hsum(a: v128) -> f32 {
-    let a = f32x4_add(a, i64x2_shuffle::<1, 0>(a, a));
-    let a = f32x4_add(a, i32x4_shuffle::<1, 0, 3, 2>(a, a));
-    f32x4_extract_lane::<0>(a)
-}
-
-#[inline(always)]
-fn wasm_i32x4_hsum(a: v128) -> i32 {
-    let a = i32x4_add(a, i64x2_shuffle::<1, 0>(a, a));
-    let a = i32x4_add(a, i32x4_shuffle::<1, 0, 3, 2>(a, a));
-    i32x4_extract_lane::<0>(a)
-}
-
 /// op_pvq_search_wasm. `_X` is not modified (unlike `op_pvq_search_c`). Like the C kernel,
 /// `iy` needs room for N+3 entries (whole vectors of 4 are stored).
 pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
@@ -188,7 +160,7 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
 
         /* Do a pre-search by projecting on the pyramid */
         if K > (N >> 1) {
-            let mut sum: f32 = wasm_f32x4_hsum(sums);
+            let mut sum: f32 = hsum_f32(sums);
             /* If X is too small, just replace it with a pulse at 0 */
             /* Prevents infinities and NaNs from causing too many pulses
             to be allocated. 64 is an approximation of infinity here. */
@@ -215,10 +187,7 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
                 /* x4 >= 0 here, so truncation is the same as the floor() in the C
                 code. x4*rcp4 is finite, not NaN and at most K+.8, so the
                 relaxed truncation is exact too. */
-                #[cfg(target_feature = "relaxed-simd")]
-                let iy4 = i32x4_relaxed_trunc_f32x4(f32x4_mul(x4, rcp4));
-                #[cfg(not(target_feature = "relaxed-simd"))]
-                let iy4 = i32x4_trunc_sat_f32x4(f32x4_mul(x4, rcp4));
+                let iy4 = trunc_i32(f32x4_mul(x4, rcp4));
                 pulses_sum = i32x4_add(pulses_sum, iy4);
                 v128_store(piy.add(j) as *mut v128, iy4);
                 let y4 = f32x4_convert_i32x4(iy4);
@@ -228,9 +197,9 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
                 v128_store(py.add(j) as *mut v128, f32x4_add(y4, y4));
                 j += 4;
             }
-            pulsesLeft -= wasm_i32x4_hsum(pulses_sum);
-            xy = wasm_f32x4_hsum(xy4);
-            yy = wasm_f32x4_hsum(yy4);
+            pulsesLeft -= hsum_i32(pulses_sum);
+            xy = hsum_f32(xy4);
+            yy = hsum_f32(yy4);
         }
         /* The padding lanes get X=0 and a huge y, so their score is either 0
         (never selected, as only scores strictly above 0 are) or far below
@@ -276,23 +245,23 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
                 let r0 = f32x4_div(f32x4_mul(rxy0, rxy0), ryy0);
                 let r1 = f32x4_div(f32x4_mul(rxy1, rxy1), ryy1);
                 /* Keep the first index of each per-lane maximum. */
-                pos0 = WASM_LANESELECT(count, pos0, f32x4_gt(r0, best0));
+                pos0 = laneselect(count, pos0, f32x4_gt(r0, best0));
                 count = i32x4_add(count, i32x4_splat(4));
-                pos1 = WASM_LANESELECT(count, pos1, f32x4_gt(r1, best1));
+                pos1 = laneselect(count, pos1, f32x4_gt(r1, best1));
                 count = i32x4_add(count, i32x4_splat(4));
                 best0 = f32x4_pmax(best0, r0);
                 best1 = f32x4_pmax(best1, r1);
                 j += 8;
             }
             /* Merge the two sets, keeping the lowest index on ties. */
-            pos0 = WASM_LANESELECT(pos1, pos0, f32x4_gt(best1, best0));
+            pos0 = laneselect(pos1, pos0, f32x4_gt(best1, best0));
             best0 = f32x4_pmax(best0, best1);
             /* Horizontal max */
             let mut max = f32x4_pmax(best0, i64x2_shuffle::<1, 0>(best0, best0));
             max = f32x4_pmax(max, i32x4_shuffle::<1, 0, 3, 2>(max, max));
             /* Among the lanes that reach the global max, pick the lowest index,
             like the C code does. */
-            pos0 = WASM_LANESELECT(pos0, i32x4_splat(0x7fffffff), f32x4_eq(best0, max));
+            pos0 = laneselect(pos0, i32x4_splat(0x7fffffff), f32x4_eq(best0, max));
             pos0 = i32x4_min(pos0, i64x2_shuffle::<1, 0>(pos0, pos0));
             pos0 = i32x4_min(pos0, i32x4_shuffle::<1, 0, 3, 2>(pos0, pos0));
             let best_id = i32x4_extract_lane::<0>(pos0) as usize;

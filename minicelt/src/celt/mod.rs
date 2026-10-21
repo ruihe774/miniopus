@@ -13,5 +13,6 @@ pub mod modes;
 pub mod pitch;
 pub mod quant_bands;
 pub mod rate;
+pub mod simd;
 pub mod static_modes_float;
 pub mod vq;
