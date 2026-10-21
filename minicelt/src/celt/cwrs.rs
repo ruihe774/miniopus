@@ -1,6 +1,5 @@
 //! Port of celt/cwrs.c (encoder side, static pulse cache: no SMALL_FOOTPRINT, no CUSTOM_MODES).
 
-use super::arch::{IMAX, IMIN};
 use super::entcode::ec_enc;
 use super::entenc::ec_enc_uint;
 use core::cell::UnsafeCell;
@@ -59,7 +58,7 @@ fn CELT_PVQ_U(_n: i32, _k: i32) -> u32 {
     // .unwrap_or(0)` on both (branches over the loads, no panic path) +0.5..+1.1 %, +122 B. A table
     // padded to a power of two for a mask would cost 3 KiB of .bss, which the one-page module lacks.
     // SAFETY: init_cwrs ran before the first encode; the table is only read here.
-    let (lo, hi) = (IMIN(_n, _k) as usize, IMAX(_n, _k) as usize);
+    let (lo, hi) = (_n.min(_k) as usize, _n.max(_k) as usize);
     debug_assert!(lo < CELT_PVQ_U_ROW.len());
     unsafe {
         let i = *CELT_PVQ_U_ROW.get_unchecked(lo) as usize + hi;

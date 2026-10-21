@@ -1,6 +1,25 @@
 //! Port of celt/mathops.h and celt/mathops.c (float build, without FLOAT_APPROX).
 
-use super::arch::{MAX16, MAX32, MIN16};
+use core::arch::wasm32::{f64x2_extract_lane, f64x2_floor, f64x2_splat, f64x2_sqrt};
+
+pub const CELT_SIG_SCALE: f32 = 32768.0;
+
+pub const Q31ONE: f32 = 1.0;
+pub const COEF_ONE: f32 = 1.0;
+pub const EPSILON: f32 = 1e-15;
+pub const VERY_SMALL: f32 = 1e-30;
+
+/// `sqrt(x)` (double): the single wasm instruction (correctly rounded, like libm's).
+#[inline(always)]
+pub fn sqrt64(x: f64) -> f64 {
+    f64x2_extract_lane::<0>(f64x2_sqrt(f64x2_splat(x)))
+}
+
+/// `floor(x)` (double): the single wasm instruction.
+#[inline(always)]
+pub fn floor64(x: f64) -> f64 {
+    f64x2_extract_lane::<0>(f64x2_floor(f64x2_splat(x)))
+}
 
 /// PI from celt/mathops.h (a double constant).
 pub const PI: f64 = 3.1415926535897931;
@@ -9,10 +28,10 @@ pub fn celt_maxabs16(x: &[f32], len: i32) -> f32 {
     let mut maxval: f32 = 0.0;
     let mut minval: f32 = 0.0;
     for &v in &x[..len as usize] {
-        maxval = MAX16(maxval, v);
-        minval = MIN16(minval, v);
+        maxval = maxval.max(v);
+        minval = minval.min(v);
     }
-    MAX32(maxval, -minval)
+    maxval.max(-minval)
 }
 
 /// celt_maxabs_res (float build) = celt_maxabs16.
@@ -67,7 +86,7 @@ pub fn celt_atan2p_norm(y: f32, x: f32) -> f32 {
 /// `(float)sqrt(x)`; also celt_sqrt32.
 #[inline(always)]
 pub fn celt_sqrt(x: f32) -> f32 {
-    crate::celt::arch::sqrt64(x as f64) as f32
+    crate::celt::mathops::sqrt64(x as f64) as f32
 }
 #[inline(always)]
 pub fn celt_sqrt32(x: f32) -> f32 {
@@ -196,13 +215,13 @@ pub fn acos64(x: f64) -> f64 {
     if (hx >> 31) != 0 {
         /* x < -0.5 */
         let z = (1.0 + x) * 0.5;
-        let s = super::arch::sqrt64(z);
+        let s = super::mathops::sqrt64(z);
         let w = r(z) * s - PIO2_LO;
         return 2. * (PIO2_HI - (s + w));
     }
     /* x > 0.5 */
     let z = (1.0 - x) * 0.5;
-    let s = super::arch::sqrt64(z);
+    let s = super::mathops::sqrt64(z);
     let df = f64::from_bits(s.to_bits() & 0xff_ff_ff_ff_00_00_00_00);
     let c = (z - df * df) / (s + df);
     let w = r(z) * s + c;

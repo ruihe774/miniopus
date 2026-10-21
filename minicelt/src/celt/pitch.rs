@@ -3,7 +3,6 @@
 
 use core::arch::wasm32::*;
 
-use super::arch::{MAX16, MAX32};
 use super::celt_lpc::{_celt_autocorr, _celt_lpc};
 use super::mathops::celt_sqrt;
 use crate::stack;
@@ -297,7 +296,7 @@ fn find_best_pitch(xcorr: &[f32], y: &[f32], len: i32, max_pitch: i32, best_pitc
             }
         }
         Syy += y[i + len] * y[i + len] - y[i] * y[i];
-        Syy = MAX32(1.0, Syy);
+        Syy = 1.0f32.max(Syy);
     }
 }
 
@@ -411,7 +410,7 @@ pub fn pitch_search(x_lp: &[f32], y: &[f32], len: i32, max_pitch: i32, pitch: &m
             continue;
         }
         let sum = celt_inner_prod(x_lp, &y[i as usize..], len >> 1);
-        *xc = MAX32(-1.0, sum);
+        *xc = (-1.0f32).max(sum);
     }
     find_best_pitch(xcorr, y, len >> 1, max_pitch >> 1, &mut best_pitch);
 
@@ -482,7 +481,7 @@ pub fn remove_doubling(
     let xw = &x[..base + nn];
     for i in 1..=base {
         yy = yy + xw[base - i] * xw[base - i] - xw[base + nn - i] * xw[base + nn - i];
-        yy_lookup[i] = MAX32(0.0, yy);
+        yy_lookup[i] = 0.0f32.max(yy);
     }
     yy = yy_lookup[T0 as usize];
     let mut best_xy = xy;
@@ -525,13 +524,13 @@ pub fn remove_doubling(
         } else {
             cont = 0.0;
         }
-        let mut thresh = MAX16(0.3, 0.7 * g0 - cont);
+        let mut thresh = 0.3f32.max(0.7 * g0 - cont);
         /* Bias against very high pitch (very short period) to avoid false-positives
         due to short-term correlation */
         if T1 < 3 * minperiod {
-            thresh = MAX16(0.4, 0.85 * g0 - cont);
+            thresh = 0.4f32.max(0.85 * g0 - cont);
         } else if T1 < 2 * minperiod {
-            thresh = MAX16(0.5, 0.9 * g0 - cont);
+            thresh = 0.5f32.max(0.9 * g0 - cont);
         }
         if g1 > thresh {
             best_xy = xy;
@@ -540,7 +539,7 @@ pub fn remove_doubling(
             g = g1;
         }
     }
-    best_xy = MAX32(0.0, best_xy);
+    best_xy = 0.0f32.max(best_xy);
     let mut pg: f32;
     if best_yy <= best_xy {
         pg = 1.0;

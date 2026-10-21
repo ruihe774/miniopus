@@ -1,4 +1,3 @@
-pub mod arch;
 pub mod bands;
 pub mod celt;
 pub mod celt_encoder;

@@ -1,6 +1,5 @@
 //! Port of celt/rate.h and celt/rate.c (encoder side; static pulse cache).
 
-use super::arch::{IMAX, IMIN};
 use super::entcode::{ec_ctx, celt_udiv, BITRES};
 use super::entenc::{ec_enc_bit_logp, ec_enc_uint};
 use super::modes;
@@ -103,7 +102,7 @@ fn interp_bits2pulses(
             if tmp >= thresh[ju] || done {
                 done = true;
                 /* Don't allocate more than we can actually use */
-                psum += IMIN(tmp, cap[ju]);
+                psum += tmp.min(cap[ju]);
             } else if tmp >= alloc_floor {
                 psum += alloc_floor;
             }
@@ -131,7 +130,7 @@ fn interp_bits2pulses(
             done = true;
         }
         /* Don't allocate more than we can actually use */
-        tmp = IMIN(tmp, cap[ju]);
+        tmp = tmp.min(cap[ju]);
         bits[ju] = tmp;
         psum += tmp;
     }
@@ -158,13 +157,13 @@ fn interp_bits2pulses(
         /* celt_udiv takes unsigned arguments and returns unsigned */
         percoeff = celt_udiv(left as u32, (eb(codedBands) - eb(start)) as u32) as i32;
         left -= (eb(codedBands) - eb(start)) * percoeff;
-        let rem = IMAX(left - (eb(j) - eb(start)), 0);
+        let rem = (left - (eb(j) - eb(start))).max(0);
         let band_width = eb(codedBands) - eb(j);
         let mut band_bits = bits[ju] + percoeff * band_width + rem;
         /*Only code a skip decision if we're above the threshold for this band.
           Otherwise it is force-skipped.
           This ensures that we have enough bits to code the skip flag.*/
-        if band_bits >= IMAX(thresh[ju], alloc_floor + (1 << BITRES)) {
+        if band_bits >= thresh[ju].max(alloc_floor + (1 << BITRES)) {
             /*This if() block is the only part of the allocation function that
                is not a mandatory part of the bitstream: any bands we choose to
                skip here must be explicitly signaled.*/
@@ -207,7 +206,7 @@ fn interp_bits2pulses(
     debug_assert!(codedBands > start);
     /* Code the intensity and dual stereo parameters. */
     if intensity_rsv > 0 {
-        *intensity = IMIN(*intensity, codedBands);
+        *intensity = (*intensity).min(codedBands);
         ec_enc_uint(ec, (*intensity - start) as u32, (codedBands + 1 - start) as u32);
     } else {
         *intensity = 0;
@@ -233,7 +232,7 @@ fn interp_bits2pulses(
     }
     j = start;
     while j < codedBands {
-        let tmp = IMIN(left, eb(j + 1) - eb(j));
+        let tmp = left.min(eb(j + 1) - eb(j));
         bits[j as usize] += tmp;
         left -= tmp;
         j += 1;
@@ -251,7 +250,7 @@ fn interp_bits2pulses(
         let bit = bits[ju] + balance;
 
         if N > 1 {
-            excess = IMAX(bit - cap[ju], 0);
+            excess = (bit - cap[ju]).max(0);
             bits[ju] = bit - excess;
 
             /* Compensate for the extra DoF in stereo */
@@ -277,7 +276,7 @@ fn interp_bits2pulses(
             }
 
             /* Divide with rounding */
-            ebits[ju] = IMAX(0, bits[ju] + offset + (den << (BITRES - 1)));
+            ebits[ju] = 0i32.max(bits[ju] + offset + (den << (BITRES - 1)));
             ebits[ju] = (celt_udiv(ebits[ju] as u32, den as u32) >> BITRES) as i32;
 
             /* Make sure not to bust */
@@ -286,7 +285,7 @@ fn interp_bits2pulses(
             }
 
             /* More than that is useless because that's about as far as PVQ can go */
-            ebits[ju] = IMIN(ebits[ju], MAX_FINE_BITS);
+            ebits[ju] = ebits[ju].min(MAX_FINE_BITS);
 
             /* If we rounded down or capped this band, make it a candidate for the
                 final fine energy pass */
@@ -296,7 +295,7 @@ fn interp_bits2pulses(
             bits[ju] -= C * ebits[ju] << BITRES;
         } else {
             /* For N=1, all bits go to fine energy except for a single sign bit */
-            excess = IMAX(0, bit - (C << BITRES));
+            excess = 0i32.max(bit - (C << BITRES));
             bits[ju] = bit - excess;
             ebits[ju] = 0;
             fine_priority[ju] = 1;
@@ -306,7 +305,7 @@ fn interp_bits2pulses(
             quant_all_bands().
            Instead, do the re-balancing here.*/
         if excess > 0 {
-            let extra_fine = IMIN(excess >> (stereo + BITRES), MAX_FINE_BITS - ebits[ju]);
+            let extra_fine = (excess >> (stereo + BITRES)).min(MAX_FINE_BITS - ebits[ju]);
             ebits[ju] += extra_fine;
             let extra_bits = extra_fine * C << BITRES;
             fine_priority[ju] = (extra_bits >= excess - balance) as i32;
@@ -349,7 +348,7 @@ pub fn clt_compute_allocation(
     let mut hi: i32;
     let len = modes::nbEBands;
 
-    total = IMAX(total, 0);
+    total = total.max(0);
     let mut skip_start = start;
     /* Reserve a bit to signal the end of manually skipped bands. */
     let skip_rsv = if total >= 1 << BITRES { 1 << BITRES } else { 0 };
@@ -383,7 +382,7 @@ pub fn clt_compute_allocation(
         let ju = j as usize;
         let N = eb(j + 1) - eb(j);
         /* Below this threshold, we're sure not to allocate any PVQ bits */
-        thresh[ju] = IMAX(C << BITRES, (3 * N << LM << BITRES) >> 4);
+        thresh[ju] = (C << BITRES).max((3 * N << LM << BITRES) >> 4);
         /* Tilt of the allocation curve */
         trim_offset[ju] = C * N * (alloc_trim - 5 - LM) * (end - j - 1) * (1 << (LM + BITRES)) >> 6;
         /* Giving less resolution to single-coefficient bands because they get
@@ -406,13 +405,13 @@ pub fn clt_compute_allocation(
             let N = eb(j + 1) - eb(j);
             let mut bitsj = C * N * (alloc_mid[ju] as i32) << LM >> 2;
             if bitsj > 0 {
-                bitsj = IMAX(0, bitsj + trim_offset[ju]);
+                bitsj = 0i32.max(bitsj + trim_offset[ju]);
             }
             bitsj += offsets[ju];
             if bitsj >= thresh[ju] || done {
                 done = true;
                 /* Don't allocate more than we can actually use */
-                psum += IMIN(bitsj, cap[ju]);
+                psum += bitsj.min(cap[ju]);
             } else if bitsj >= C << BITRES {
                 psum += C << BITRES;
             }
@@ -440,10 +439,10 @@ pub fn clt_compute_allocation(
             Some(alloc_hi) => C * N * (alloc_hi[ju] as i32) << LM >> 2,
         };
         if bits1j > 0 {
-            bits1j = IMAX(0, bits1j + trim_offset[ju]);
+            bits1j = 0i32.max(bits1j + trim_offset[ju]);
         }
         if bits2j > 0 {
-            bits2j = IMAX(0, bits2j + trim_offset[ju]);
+            bits2j = 0i32.max(bits2j + trim_offset[ju]);
         }
         if lo > 0 {
             bits1j += offsets[ju];
@@ -452,7 +451,7 @@ pub fn clt_compute_allocation(
         if offsets[ju] > 0 {
             skip_start = j;
         }
-        bits2j = IMAX(0, bits2j - bits1j);
+        bits2j = 0i32.max(bits2j - bits1j);
         bits1[ju] = bits1j;
         bits2[ju] = bits2j;
     }

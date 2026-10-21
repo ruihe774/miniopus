@@ -1,6 +1,5 @@
 //! Port of celt/laplace.c (encoder side).
 
-use super::arch::IMIN;
 use super::entcode::ec_enc;
 use super::entenc::ec_encode_bin;
 
@@ -40,7 +39,7 @@ pub fn ec_laplace_encode(enc: &mut ec_enc, value: &mut i32, mut fs: u32, decay: 
             /* (32768-fl+LAPLACE_MINP-1) is unsigned in C, converted to int. */
             let mut ndi_max = (32768u32.wrapping_sub(fl) + LAPLACE_MINP - 1) as i32 >> LAPLACE_LOG_MINP;
             ndi_max = (ndi_max - s) >> 1;
-            let di = IMIN(val - i, ndi_max - 1);
+            let di = (val - i).min(ndi_max - 1);
             /* int added to unsigned */
             fl = fl.wrapping_add(((2 * di + 1 + s) * LAPLACE_MINP as i32) as u32);
             /* IMIN(int, unsigned) compares as unsigned */

@@ -6,7 +6,7 @@
 
 use core::arch::wasm32::*;
 
-use super::arch::EPSILON;
+use super::mathops::EPSILON;
 use super::bands::SPREAD_NONE;
 use super::cwrs::encode_pulses;
 use super::entcode::{celt_udiv, ec_enc};
@@ -370,5 +370,5 @@ pub fn stereo_itheta(X: &[f32], Y: &[f32], stereo: i32, N: i32) -> i32 {
     }
     let mid = celt_sqrt32(Emid);
     let side = celt_sqrt32(Eside);
-    crate::celt::arch::floor64((0.5f32 + 65536.0f32 * 16384.0 * celt_atan2p_norm(side, mid)) as f64) as i32
+    crate::celt::mathops::floor64((0.5f32 + 65536.0f32 * 16384.0 * celt_atan2p_norm(side, mid)) as f64) as i32
 }

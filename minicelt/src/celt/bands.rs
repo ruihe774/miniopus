@@ -9,10 +9,9 @@
 //! folding source `lowband` and the output `lowband_out` point into the `norm` buffer, and
 //! without resynthesis `lowband_scratch` points into X itself.
 
-use super::arch::{IMAX, IMIN, MIN32, Q31ONE};
 use super::entcode::{BITRES, EC_ILOG, celt_sudiv, celt_udiv, ec_ctx, ec_tell_frac};
 use super::entenc::{ec_enc_bit_logp, ec_enc_bits, ec_enc_uint, ec_encode};
-use super::mathops::celt_sqrt;
+use super::mathops::{Q31ONE, celt_sqrt};
 use super::modes;
 use super::pitch::celt_inner_prod;
 use super::rate::{QTHETA_OFFSET, QTHETA_OFFSET_TWOPHASE, bits2pulses, get_pulses, pulses2bits};
@@ -127,7 +126,7 @@ corresponds to some quick-and-dirty perceptual experiments I ran to
 measure inter-aural masking (there doesn't seem to be any published data
 on the topic). */
 fn compute_channel_weights(mut Ex: f32, mut Ey: f32, w: &mut [f32; 2]) {
-    let minE = MIN32(Ex, Ey);
+    let minE = Ex.min(Ey);
     /* Adjustment to make the weights a bit more conservative. */
     Ex = Ex + minE / 3.0;
     Ey = Ey + minE / 3.0;
@@ -139,7 +138,7 @@ fn intensity_stereo(X: &mut [f32], Y: &[f32], bandE: &[f32], bandID: i32, N: i32
     let i = bandID as usize;
     let left = bandE[i];
     let right = bandE[i + modes::nbEBands as usize];
-    let norm: f32 = super::arch::EPSILON + celt_sqrt(super::arch::EPSILON + left * left + right * right);
+    let norm: f32 = super::mathops::EPSILON + celt_sqrt(super::mathops::EPSILON + left * left + right * right);
     let a1 = left / norm;
     let a2 = right / norm;
     /* the callers pass X and Y with length N */
@@ -411,9 +410,9 @@ fn compute_qn(N: i32, b: i32, offset: i32, pulse_cap: i32, stereo: i32) -> i32 {
     always have enough bits left over to code at least one pulse in the
     side; otherwise it would collapse, since it doesn't get folded. */
     qb = celt_sudiv(b + N2 * offset, N2);
-    qb = IMIN(b - pulse_cap - (4 << BITRES), qb);
+    qb = (b - pulse_cap - (4 << BITRES)).min(qb);
 
-    qb = IMIN(8 << BITRES, qb);
+    qb = (8 << BITRES).min(qb);
 
     if qb < (1 << BITRES >> 1) {
         qn = 1;
@@ -513,7 +512,7 @@ unsafe fn compute_theta(
         } else {
             /* Bias quantization towards itheta=0 and itheta=16384. */
             let bias = if itheta > 8192 { 32767 / qn } else { -32767 / qn };
-            let down = IMIN(qn - 1, IMAX(0, (itheta * qn + bias) >> 14));
+            let down = (qn - 1).min(0i32.max((itheta * qn + bias) >> 14));
             if ctx.theta_round < 0 {
                 itheta = down;
             } else {
@@ -698,10 +697,10 @@ unsafe fn quant_partition(
                 delta -= delta >> (4 - LM);
             } else {
                 /* Corresponds to a forward-masking slope of 1.5 dB per 10 ms */
-                delta = IMIN(0, delta + (N << BITRES >> (5 - LM)));
+                delta = 0i32.min(delta + (N << BITRES >> (5 - LM)));
             }
         }
-        let mut mbits = IMAX(0, IMIN(b, (b - delta) / 2));
+        let mut mbits = 0i32.max(b.min((b - delta) / 2));
         let mut sbits = b - mbits;
         ctx.remaining_bits -= qalloc;
 
@@ -905,7 +904,7 @@ unsafe fn quant_band(
 
         /* Scale output for later folding */
         if !lowband_out.is_null() {
-            let n: f32 = crate::celt::arch::sqrt64(N0 as f64) as f32;
+            let n: f32 = crate::celt::mathops::sqrt64(N0 as f64) as f32;
             let lowband_out = unsafe { slice_mut(lowband_out, N0) };
             for (o, &v) in lowband_out.iter_mut().zip(x.iter()) {
                 *o = n * v;
@@ -1015,7 +1014,7 @@ unsafe fn quant_band_stereo(
         }
     } else {
         /* "Normal" split code */
-        mbits = IMAX(0, IMIN(b, (b - delta) / 2));
+        mbits = 0i32.max(b.min((b - delta) / 2));
         sbits = b - mbits;
         ctx.remaining_bits -= qalloc;
 
@@ -1180,8 +1179,8 @@ pub fn quant_all_bands(
         let remaining_bits = total_bits - tell - 1;
         ctx.remaining_bits = remaining_bits;
         let b = if i <= codedBands - 1 {
-            let curr_balance = celt_sudiv(balance, IMIN(3, codedBands - i));
-            IMAX(0, IMIN(16383, IMIN(remaining_bits + 1, pulses[i as usize] + curr_balance)))
+            let curr_balance = celt_sudiv(balance, 3i32.min(codedBands - i));
+            0i32.max(16383i32.min((remaining_bits + 1).min(pulses[i as usize] + curr_balance)))
         } else {
             0
         };
@@ -1209,7 +1208,7 @@ pub fn quant_all_bands(
         going to be folding from. */
         if lowband_offset != 0 && (spread != SPREAD_AGGRESSIVE || B > 1 || tf_change < 0) {
             /* This ensures we never repeat spectral content within one band */
-            effective_lowband = IMAX(0, M * eb(lowband_offset) - norm_offset - N);
+            effective_lowband = 0i32.max(M * eb(lowband_offset) - norm_offset - N);
             let mut fold_start = lowband_offset;
             loop {
                 fold_start -= 1;

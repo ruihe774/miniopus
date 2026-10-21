@@ -40,7 +40,6 @@
 //! contents are clobbered. It has room for `channels * (960 + overlap)` samples: this keeps
 //! those two buffers (8640 bytes for stereo) out of the pseudostack.
 
-use crate::celt::arch::{IMIN, celt_isnan};
 use crate::celt::celt_encoder::{CELTEncoder, celt_encode_with_ec, celt_encoder_init};
 use crate::celt::entcode::{ec_enc, ec_tell};
 use crate::celt::entenc::ec_enc_init;
@@ -119,8 +118,8 @@ fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
             let (x0, x1) = (f[0], f[1]);
             let out0 = x0 - m0;
             let out1 = x1 - m2;
-            m0 = coef * x0 + crate::celt::arch::VERY_SMALL + coef2 * m0;
-            m2 = coef * x1 + crate::celt::arch::VERY_SMALL + coef2 * m2;
+            m0 = coef * x0 + crate::celt::mathops::VERY_SMALL + coef2 * m0;
+            m2 = coef * x1 + crate::celt::mathops::VERY_SMALL + coef2 * m2;
             f[0] = out0;
             f[1] = out1;
         }
@@ -131,7 +130,7 @@ fn dc_reject(buf: &mut [f32], hp_mem: &mut [f32; 4], channels: i32) {
         for v in &mut buf[..FRAME_SIZE as usize] {
             let x = *v;
             let y = x - m0;
-            m0 = coef * x + crate::celt::arch::VERY_SMALL + coef2 * m0;
+            m0 = coef * x + crate::celt::mathops::VERY_SMALL + coef2 * m0;
             *v = y;
         }
         hp_mem[0] = m0;
@@ -322,7 +321,7 @@ impl OpusEncoder {
         } else {
             self.user_bitrate_bps
         };
-        let bitrate_bps = IMIN(user_bitrate, PACKET_SIZE_CAP as i32 * 8 * 50);
+        let bitrate_bps = user_bitrate.min(PACKET_SIZE_CAP as i32 * 8 * 50);
 
         /* max_data_bytes (1276) >= 3 and the frame rate is 50 */
         if bitrate_bps < 3 * 50 * 8 {
@@ -447,7 +446,7 @@ impl OpusEncoder {
             let sum = celt_inner_prod(pcm, pcm, n);
             /* This should filter out both NaNs and ridiculous signals that could
             cause NaNs further down. */
-            if !(sum < 1e9f32) || celt_isnan(sum) {
+            if !(sum < 1e9f32) || sum.is_nan() {
                 pcm.fill(0.0);
                 self.hp_mem = [0.0; 4];
             }
