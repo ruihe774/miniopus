@@ -111,6 +111,7 @@ all-zeros per lane, for which relaxed_laneselect is fully defined. */
 fn WASM_LANESELECT(a: v128, b: v128, m: v128) -> v128 {
     i32x4_relaxed_laneselect(a, b, m)
 }
+
 #[cfg(not(target_feature = "relaxed-simd"))]
 #[inline(always)]
 fn WASM_LANESELECT(a: v128, b: v128, m: v128) -> v128 {

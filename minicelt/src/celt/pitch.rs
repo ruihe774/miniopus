@@ -16,6 +16,7 @@ not match the C summation order anyway. */
 fn WASM_F32X4_MADD(a: v128, b: v128, c: v128) -> v128 {
     f32x4_relaxed_madd(a, b, c)
 }
+
 #[cfg(not(target_feature = "relaxed-simd"))]
 #[inline(always)]
 fn WASM_F32X4_MADD(a: v128, b: v128, c: v128) -> v128 {

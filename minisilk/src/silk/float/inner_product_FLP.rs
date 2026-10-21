@@ -9,6 +9,7 @@ use core::arch::wasm32::*;
 fn MADD_F64X2(a: v128, b: v128, acc: v128) -> v128 {
     f64x2_relaxed_madd(a, b, acc)
 }
+
 #[cfg(not(target_feature = "relaxed-simd"))]
 #[inline(always)]
 fn MADD_F64X2(a: v128, b: v128, acc: v128) -> v128 {

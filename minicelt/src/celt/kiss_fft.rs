@@ -130,6 +130,7 @@ fn C_MUL(a: kiss_fft_cpx, b: kiss_twiddle_cpx) -> kiss_fft_cpx {
         i: a.r * b.i + a.i * b.r,
     }
 }
+
 /// C_ADD(res,a,b)
 #[inline(always)]
 fn C_ADD(a: kiss_fft_cpx, b: kiss_fft_cpx) -> kiss_fft_cpx {
@@ -138,6 +139,7 @@ fn C_ADD(a: kiss_fft_cpx, b: kiss_fft_cpx) -> kiss_fft_cpx {
         i: a.i + b.i,
     }
 }
+
 /// C_SUB(res,a,b)
 #[inline(always)]
 fn C_SUB(a: kiss_fft_cpx, b: kiss_fft_cpx) -> kiss_fft_cpx {
@@ -146,12 +148,14 @@ fn C_SUB(a: kiss_fft_cpx, b: kiss_fft_cpx) -> kiss_fft_cpx {
         i: a.i - b.i,
     }
 }
+
 /// C_ADDTO(res,a)
 #[inline(always)]
 fn C_ADDTO(res: &mut kiss_fft_cpx, a: kiss_fft_cpx) {
     res.r += a.r;
     res.i += a.i;
 }
+
 /// HALF_OF(x): `(x)*.5f`
 #[inline(always)]
 fn HALF_OF(x: f32) -> f32 {

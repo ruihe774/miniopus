@@ -20,14 +20,17 @@ pub const VERY_SMALL: f32 = 1e-30;
 pub fn fmin(a: f32, b: f32) -> f32 {
     if a < b { a } else { b }
 }
+
 #[inline(always)]
 pub fn fmax(a: f32, b: f32) -> f32 {
     if a > b { a } else { b }
 }
+
 #[inline(always)]
 pub fn imin(a: i32, b: i32) -> i32 {
     if a < b { a } else { b }
 }
+
 #[inline(always)]
 pub fn imax(a: i32, b: i32) -> i32 {
     if a > b { a } else { b }
@@ -136,11 +139,13 @@ pub fn atan2p_norm(y: f32, x: f32) -> f32 {
 pub fn sqrt(x: f32) -> f32 {
     sqrt64(x as f64) as f32
 }
+
 /// `1.f/sqrt(x)`; C celt_rsqrt, celt_rsqrt_norm, celt_rsqrt_norm32.
 #[inline(always)]
 pub fn rsqrt(x: f32) -> f32 {
     1.0 / sqrt(x)
 }
+
 /// `(float)cos((.5f*PI)*(x))` for `0 < x < 1` (its only use, exp_rotation, passes `theta` and
 /// `1 - theta` with `theta < .5`). This is libm's `cos` (FreeBSD s_cos.c) restricted to the
 /// angles `0 < a < pi/2` that this gives, without the general argument reduction: up to pi/4
@@ -188,11 +193,13 @@ pub fn cos_norm(x: f32) -> f32 {
         (-(y0 - ((z * (0.5 * y1 - v * r) - y1) - v * S1))) as f32
     }
 }
+
 /// `1.f/(x)`; C celt_rcp.
 #[inline(always)]
 pub fn rcp(x: f32) -> f32 {
     1.0 / x
 }
+
 /// `(float)(1.442695040888963387*log(x))` for a positive normal finite `x` (band energies, which
 /// are at least `sqrt(1e-27)`, and `1.001 - c*c` with `|c| <= 1`); C celt_log2, celt_log2_db. This is
 /// libm's `log` (FreeBSD e_log.c) without the special cases, with the argument reduction done on
@@ -227,6 +234,7 @@ pub fn log2(x: f32) -> f32 {
     let dk = k as f64;
     (1.442695040888963387 * (s * (hfsq + r) + dk * LN2_LO - hfsq + f + dk * LN2_HI)) as f32
 }
+
 /// `(float)exp(0.6931471805599453094*(x))` for `0 <= x <= 4` on the `f32` lanes 0 and 1 of `x`
 /// (results in lanes 0 and 1, lanes 2 and 3 zero); C celt_exp2, celt_exp2_db. Its only use, the
 /// dynalloc importance, passes `MIN32(4, follower)` with `follower >= 0`. This is libm's `exp`

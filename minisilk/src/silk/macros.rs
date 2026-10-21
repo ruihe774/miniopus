@@ -24,8 +24,11 @@
 /// (Same trait as minicelt's `arch::Ix`; minisilk has no `arch` module.)
 pub trait Ix<T: Copy> {
     fn at(&self, i: usize) -> T;
+
     fn at_mut(&mut self, i: usize) -> &mut T;
+
     fn rg<R: core::slice::SliceIndex<[T], Output = [T]>>(&self, r: R) -> &[T];
+
     fn rg_mut<R: core::slice::SliceIndex<[T], Output = [T]>>(&mut self, r: R) -> &mut [T];
 }
 
@@ -39,16 +42,19 @@ impl<T: Copy> Ix<T> for [T] {
             unsafe { *self.get_unchecked(i) }
         }
     }
+
     #[inline(always)]
     fn rg<R: core::slice::SliceIndex<[T], Output = [T]>>(&self, r: R) -> &[T] {
         // SAFETY: see the trait documentation.
         if cfg!(debug_assertions) { &self[r] } else { unsafe { self.get_unchecked(r) } }
     }
+
     #[inline(always)]
     fn rg_mut<R: core::slice::SliceIndex<[T], Output = [T]>>(&mut self, r: R) -> &mut [T] {
         // SAFETY: see the trait documentation.
         if cfg!(debug_assertions) { &mut self[r] } else { unsafe { self.get_unchecked_mut(r) } }
     }
+
     #[inline(always)]
     fn at_mut(&mut self, i: usize) -> &mut T {
         if cfg!(debug_assertions) {
