@@ -1,6 +1,5 @@
 //! Port of celt/celt_encoder.c (48 kHz, 20 ms frames, mono/stereo, VBR / constrained VBR).
 
-use super::arch::Ix;
 use super::arch::{ABS16, ABS32, CELT_SIG_SCALE, EPSILON, IMAX, IMIN, MAX16, MAX32, MIN16, MIN32, celt_isnan};
 use super::bands::{
     SPREAD_NONE, SPREAD_NORMAL, compute_band_energies, haar1, hysteresis_decision, normalise_bands,
@@ -1414,9 +1413,6 @@ pub fn compute_vbr(
 /// the CBR branches are removed), no analysis, no QEXT, no RESYNTH, no LFE, no energy mask
 /// (surround), no `signalling`, `start == 0` (so `hybrid == 0` and the hybrid-only code is
 /// removed). `pitch_change` is not computed (it only feeds the analysis terms of compute_vbr).
-// IX-HARD: the `buf.rg_mut(..CC * (N + overlap))` and `prefilter_mem.rg(.. mp - ovu ..)` ranges (from the
-// frame size and channel count). The band-level loops (`bandLogE`, `oldBandE`, `energyError`, `offsets`,
-// `cap`; a re-slice to `nb` / `C * nb` would do) are left on `Ix` too; not measured.
 pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_enc) -> i32 {
     let mut bits: i32;
     let mut shortBlocks: i32;
@@ -1458,6 +1454,13 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     let N: i32 = 960;
     let (Nu, ovu) = (N as usize, overlap as usize);
     let mp = COMBFILTER_MAXPERIOD as usize;
+    /* The channel counts and `end` as indices: CC and C are 1 or 2 with C <= CC, end <= nbEBands (the
+    clamps only make the bounds visible to the compiler). */
+    debug_assert!((CC == 1 || CC == 2) && (C == 1 || C == CC) && end as usize <= nb);
+    let ccu: usize = if CC == 2 { 2 } else { 1 };
+    let cu: usize = if C == 2 { ccu } else { 1 };
+    let endu = (end as usize).min(nb);
+    let buf = &mut buf[..ccu * (Nu + ovu)];
 
     /* prefilter_mem, oldBandE, oldLogE, oldLogE2, energyError are the st fields of those names. */
 
@@ -1500,18 +1503,18 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
 
     /* The encoder-wide buffers that outlive the MDCT phase are allocated first: the PCM copy and the
     MDCT output below are scoped, so that the pseudostack peak stays low. */
-    let bandE = sg.alloc::<f32>(nb * CC as usize);
-    let bandLogE = sg.alloc::<f32>(nb * CC as usize);
-    let bandLogE2 = sg.alloc::<f32>(C as usize * nb);
+    let bandE = sg.alloc::<f32>(nb * ccu);
+    let bandLogE = sg.alloc::<f32>(nb * ccu);
+    let bandLogE2 = sg.alloc::<f32>(cu * nb);
 
     {
         let sgp = stack::save();
-        let pcm = sgp.alloc::<f32>((CC * N) as usize);
-        pcm.copy_from_slice(buf.rg(..(CC * N) as usize));
-        let in_ = buf.rg_mut(..(CC * (N + overlap)) as usize);
+        let pcm = sgp.alloc::<f32>(ccu * Nu);
+        pcm.copy_from_slice(&buf[..ccu * Nu]);
+        let in_ = &mut *buf;
 
         let mut sample_max: f32 = MAX32(st.overlap_max, celt_maxabs_res(pcm, C * (N - overlap)));
-        st.overlap_max = celt_maxabs_res(pcm.rg((C * (N - overlap)) as usize..), C * overlap);
+        st.overlap_max = celt_maxabs_res(&pcm[cu * (Nu - ovu)..], C * overlap);
         sample_max = MAX32(sample_max, st.overlap_max);
         silence = (sample_max <= 1.0f32 / (1i32 << st.lsb_depth) as f32) as i32;
         /* tell == 1 */
@@ -1530,21 +1533,15 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
             tell = nbCompressedBytes * 8;
             enc.nbits_total += tell - ec_tell(enc);
         }
-        for c in 0..CC as usize {
-            let need_clip = sample_max > 65536.0;
-            let base = c * (Nu + ovu);
-            celt_preemphasis(
-                pcm,
-                c,
-                in_.rg_mut(base + ovu..base + ovu + Nu),
-                CC,
-                st.preemph_memE.at_mut(c),
-                need_clip,
-            );
-            in_.rg_mut(base..base + ovu).copy_from_slice(st.prefilter_mem.rg((1 + c) * mp - ovu..(1 + c) * mp));
+        let need_clip = sample_max > 65536.0;
+        /* channel c: [the last `overlap` samples of prefilter_mem[c] | the pre-emphasized input] */
+        let pm = st.prefilter_mem.as_chunks::<{ COMBFILTER_MAXPERIOD as usize }>().0;
+        for (c, (x, mem)) in in_.as_chunks_mut::<{ 960 + modes::overlap as usize }>().0.iter_mut().zip(&mut st.preemph_memE).enumerate() {
+            celt_preemphasis(pcm, c, &mut x[ovu..], CC, mem, need_clip);
+            x[..ovu].copy_from_slice(&pm[c & 1][mp - ovu..]);
         }
     }
-    let in_ = buf.rg_mut(..(CC * (N + overlap)) as usize);
+    let in_ = &mut *buf;
 
     let tone_freq: f32 = tone_detect(in_, CC, N + overlap, &mut toneishness);
     isTransient = 0;
@@ -1619,9 +1616,9 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
         compute_mdcts(0, in_, freq, C, CC);
         compute_band_energies(freq, bandE, end, C);
         amp2Log2(end, bandE, bandLogE2, C);
-        for c in 0..C as usize {
-            for i in 0..end as usize {
-                *bandLogE2.at_mut(nb * c + i) += 0.5f32 * LM as f32;
+        for row in bandLogE2.as_chunks_mut::<{ modes::nbEBands as usize }>().0 {
+            for v in &mut row[..endu] {
+                *v += 0.5f32 * LM as f32;
             }
         }
     }
@@ -1644,10 +1641,13 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
         let mut follow: f32 = -10.0;
         let mut frame_avg: f32 = 0.0;
         let offset: f32 = if shortBlocks != 0 { 0.5f32 * LM as f32 } else { 0.0 };
-        for i in start as usize..end as usize {
-            follow = MAX32(follow - 1.0, bandLogE.at(i) - offset);
+        /* start == 0 */
+        let (b0, b1) = bandLogE.split_at(nb);
+        let b1 = if C == 2 { b1 } else { b0 };
+        for (&x0, &x1) in b0[..endu].iter().zip(b1) {
+            follow = MAX32(follow - 1.0, x0 - offset);
             if C == 2 {
-                follow = MAX32(follow, bandLogE.at(i + nb) - offset);
+                follow = MAX32(follow, x1 - offset);
             }
             frame_avg += follow;
         }
@@ -1658,7 +1658,7 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     }
 
     if !secondMdct {
-        bandLogE2.copy_from_slice(bandLogE.rg(..C as usize * nb));
+        bandLogE2.copy_from_slice(&bandLogE[..cu * nb]);
     }
 
     /* Last chance to catch any transient we might have missed in the
@@ -1671,9 +1671,9 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
             compute_band_energies(freq, bandE, end, C);
             amp2Log2(end, bandE, bandLogE, C);
             /* Compensate for the scaling of short vs long mdcts */
-            for c in 0..C as usize {
-                for i in 0..end as usize {
-                    *bandLogE2.at_mut(nb * c + i) += 0.5f32 * LM as f32;
+            for row in bandLogE2.as_chunks_mut::<{ modes::nbEBands as usize }>().0 {
+                for v in &mut row[..endu] {
+                    *v += 0.5f32 * LM as f32;
                 }
             }
             tf_estimate = 0.2;
@@ -1686,10 +1686,10 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
 
     /* Band normalisation: the normalised spectrum X goes to the caller's buffer (`in_` is not
     needed anymore), which frees the MDCT output */
-    let X = buf.rg_mut(..(C * N) as usize);
+    let X = &mut buf[..cu * Nu];
     normalise_bands(freq, X, bandE, end, C);
     drop(sgf);
-    let X = buf.rg_mut(..(C * N) as usize);
+    let X = &mut buf[..cu * Nu];
 
     let enable_tf_analysis = effectiveBytes >= 15 * C && st.complexity >= 2 && toneishness < 0.98f32;
 
@@ -1724,20 +1724,24 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
         tf_select = tf_analysis(end, isTransient, tf_res, lambda, X, N, tf_estimate, tf_chan, importance);
     } else {
         /* (the two hybrid cases are removed) */
-        for i in 0..end as usize {
-            *tf_res.at_mut(i) = isTransient;
-        }
+        tf_res[..endu].fill(isTransient);
         tf_select = 0;
     }
 
-    let error = sg.alloc::<f32>(C as usize * nb);
-    for c in 0..C as usize {
-        for i in start as usize..end as usize {
+    let error = sg.alloc::<f32>(cu * nb);
+    const NB: usize = modes::nbEBands as usize;
+    for ((b, o), e) in bandLogE.as_chunks_mut::<NB>().0[..cu]
+        .iter_mut()
+        .zip(st.oldBandE.as_chunks::<NB>().0)
+        .zip(st.energyError.as_chunks::<NB>().0)
+    {
+        /* (start == 0) */
+        for ((b, &o), &e) in b[..endu].iter_mut().zip(o).zip(e) {
             /* When the energy is stable, slightly bias energy quantization towards
             the previous error to make the gain more stable (a constant offset is
             better than fluctuations). */
-            if ABS32(bandLogE.at(i + c * nb) - st.oldBandE.at(i + c * nb)) < 2.0 {
-                *bandLogE.at_mut(i + c * nb) -= 0.25f32 * st.energyError.at(i + c * nb);
+            if ABS32(*b - o) < 2.0 {
+                *b -= 0.25f32 * e;
             }
         }
     }
@@ -1793,16 +1797,16 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     total_bits <<= BITRES;
     let mut total_boost: i32 = 0;
     tell = ec_tell_frac(enc) as i32;
-    for i in start as usize..end as usize {
-        let width: i32 = C * (eBands.at(i + 1) as i32 - eBands.at(i) as i32) << LM;
+    for i in start as usize..endu {
+        let width: i32 = C * (eBands[i + 1] as i32 - eBands[i] as i32) << LM;
         /* quanta is 6 bits, but no more than 1 bit/sample
         and no less than 1/8 bit/sample */
         let quanta: i32 = IMIN(width << BITRES, IMAX(6 << BITRES, width));
         let mut dynalloc_loop_logp: i32 = dynalloc_logp;
         let mut boost: i32 = 0;
         let mut j: i32 = 0;
-        while tell + (dynalloc_loop_logp << BITRES) < total_bits - total_boost && boost < cap.at(i) {
-            let flag: i32 = (j < offsets.at(i)) as i32;
+        while tell + (dynalloc_loop_logp << BITRES) < total_bits - total_boost && boost < cap[i] {
+            let flag: i32 = (j < offsets[i]) as i32;
             ec_enc_bit_logp(enc, flag, dynalloc_loop_logp as u32);
             tell = ec_tell_frac(enc) as i32;
             if flag == 0 {
@@ -1817,7 +1821,7 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
         if j != 0 {
             dynalloc_logp = IMAX(2, dynalloc_logp - 1);
         }
-        *offsets.at_mut(i) = boost;
+        offsets[i] = boost;
     }
 
     if C == 2 {
@@ -1985,7 +1989,7 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     }
 
     quant_fine_energy(end, &mut st.oldBandE, error, fine_quant, enc, C);
-    st.energyError.rg_mut(..nb * CC as usize).fill(0.0);
+    st.energyError[..nb * ccu].fill(0.0);
 
     /* Residual quantisation */
     let collapse_masks = sg.alloc::<u8>(C as usize * nb);
@@ -2020,15 +2024,14 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     /* (qext_bytes is always 0) */
     let bits_left = nbCompressedBytes * 8 - ec_tell(enc);
     quant_energy_finalise(end, &mut st.oldBandE, error, fine_quant, fine_priority, bits_left, enc, C);
-    for c in 0..C as usize {
-        for i in start as usize..end as usize {
-            *st.energyError.at_mut(i + c * nb) = MAX32(-0.5, MIN32(0.5, error.at(i + c * nb)));
+    for (ee, er) in st.energyError.as_chunks_mut::<NB>().0.iter_mut().zip(error.as_chunks::<NB>().0) {
+        /* (start == 0) */
+        for (ee, &er) in ee[..endu].iter_mut().zip(er) {
+            *ee = MAX32(-0.5, MIN32(0.5, er));
         }
     }
     if silence != 0 {
-        for i in 0..C as usize * nb {
-            *st.oldBandE.at_mut(i) = -28.0;
-        }
+        st.oldBandE[..cu * nb].fill(-28.0);
     }
 
     /* (RESYNTH removed) */
@@ -2041,22 +2044,21 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
         st.oldBandE.copy_within(0..nb, nb);
     }
 
-    let ccn = CC as usize * nb;
+    let ccn = ccu * nb;
     if isTransient == 0 {
-        st.oldLogE2.rg_mut(..ccn).copy_from_slice(st.oldLogE.rg(..ccn));
-        st.oldLogE.rg_mut(..ccn).copy_from_slice(st.oldBandE.rg(..ccn));
+        st.oldLogE2[..ccn].copy_from_slice(&st.oldLogE[..ccn]);
+        st.oldLogE[..ccn].copy_from_slice(&st.oldBandE[..ccn]);
     } else {
-        for i in 0..ccn {
-            *st.oldLogE.at_mut(i) = MIN32(st.oldLogE.at(i), st.oldBandE.at(i));
+        for (l, &b) in st.oldLogE[..ccn].iter_mut().zip(&st.oldBandE) {
+            *l = MIN32(*l, b);
         }
     }
-    /* In case start or end were to change */
-    for c in 0..CC as usize {
-        for i in (0..start as usize).chain(end as usize..nb) {
-            *st.oldBandE.at_mut(c * nb + i) = 0.0;
-            *st.oldLogE2.at_mut(c * nb + i) = -28.0;
-            *st.oldLogE.at_mut(c * nb + i) = -28.0;
-        }
+    /* In case start or end were to change (start == 0) */
+    for c in 0..ccu {
+        let r = c * nb + endu..(c + 1) * nb;
+        st.oldBandE[r.clone()].fill(0.0);
+        st.oldLogE2[r.clone()].fill(-28.0);
+        st.oldLogE[r].fill(-28.0);
     }
 
     if isTransient != 0 || transient_got_disabled != 0 {
