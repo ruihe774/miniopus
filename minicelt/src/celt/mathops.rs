@@ -157,15 +157,65 @@ pub fn celt_cos_norm(x: f32) -> f32 {
 pub fn celt_rcp(x: f32) -> f32 {
     1.0 / x
 }
-/// `(float)(1.442695040888963387*log(x))`; also celt_log2_db.
-#[inline(always)]
+/// `(float)(1.442695040888963387*log(x))` for a positive normal finite `x` (band energies, which
+/// are at least `sqrt(1e-27)`, and `1.001 - c*c` with `|c| <= 1`); also celt_log2_db. This is
+/// libm's `log` (FreeBSD e_log.c) without the special cases, with the argument reduction done on
+/// the `f32` bits: the split at `sqrt(2)` uses the 20 mantissa bits libm compares, so `k` and `f`
+/// are libm's. The result is bit for bit that of `libm::log` (checked for every positive normal
+/// finite `f32`).
 pub fn celt_log2(x: f32) -> f32 {
-    (1.442695040888963387 * libm::log(x as f64)) as f32
+    const LN2_HI: f64 = 6.93147180369123816490e-01;
+    const LN2_LO: f64 = 1.90821492927058770002e-10;
+    const LG: [f64; 7] = [
+        6.666666666666735130e-01,
+        3.999999999940941908e-01,
+        2.857142874366239149e-01,
+        2.222219843214978396e-01,
+        1.818357216161805012e-01,
+        1.531383769920937332e-01,
+        1.479819860511658591e-01,
+    ];
+    debug_assert!(x >= f32::MIN_POSITIVE && x < f32::INFINITY);
+    /* x = 2^k*(1+f) with sqrt(2)/2 < 1+f < sqrt(2) */
+    let ix = x.to_bits() + (0x3f800000 - 0x3f3504f0);
+    let k = (ix >> 23) as i32 - 0x7f;
+    let f = f32::from_bits((ix & 0x7fffff) + 0x3f3504f0) as f64 - 1.0;
+    /* log(1+f) = 2s + s*R(s*s) with s = f/(2+f) */
+    let hfsq = 0.5 * f * f;
+    let s = f / (2.0 + f);
+    let z = s * s;
+    let w = z * z;
+    let t1 = w * (LG[1] + w * (LG[3] + w * LG[5]));
+    let t2 = z * (LG[0] + w * (LG[2] + w * (LG[4] + w * LG[6])));
+    let r = t2 + t1;
+    let dk = k as f64;
+    (1.442695040888963387 * (s * (hfsq + r) + dk * LN2_LO - hfsq + f + dk * LN2_HI)) as f32
 }
-/// `(float)exp(0.6931471805599453094*(x))`; also celt_exp2_db.
-#[inline(always)]
+/// `(float)exp(0.6931471805599453094*(x))` for `0 <= x <= 4` (its only use, the dynalloc
+/// importance, passes `MIN32(4, follower)` with `follower >= 0`); also celt_exp2_db. This is
+/// libm's `exp` (FreeBSD e_exp.c) without the special cases and `scalbn`: the reduction
+/// `x*ln2 = k*ln2 + r` takes `k` as `x` rounded half up (`0 <= k <= 4`), and `2^k` is exact.
+/// The result is bit for bit that of `libm::exp` (checked for every `f32` in `[0, 4]`).
 pub fn celt_exp2(x: f32) -> f32 {
-    libm::exp(0.6931471805599453094 * x as f64) as f32
+    const LN2_HI: f64 = 6.93147180369123816490e-01;
+    const LN2_LO: f64 = 1.90821492927058770002e-10;
+    const P: [f64; 5] = [
+        1.66666666666666019037e-01,
+        -2.77777777770155933842e-03,
+        6.61375632143793436117e-05,
+        -1.65339022054652515390e-06,
+        4.13813679705723846039e-08,
+    ];
+    debug_assert!(x >= 0.0 && x <= 4.0);
+    let k = (x + 0.5) as i32;
+    let hi = 0.6931471805599453094 * x as f64 - k as f64 * LN2_HI; /* k*LN2_HI is exact */
+    let lo = k as f64 * LN2_LO;
+    let r = hi - lo;
+    /* exp(r) = 1 + 2r/(2 - c) - r with c = r - r*r*P(r*r) */
+    let rr = r * r;
+    let c = r - rr * (P[0] + rr * (P[1] + rr * (P[2] + rr * (P[3] + rr * P[4]))));
+    let y = 1. + (r * c / (2. - c) - lo + hi);
+    (y * f64::from_bits(((0x3ff + k) as u64) << 52)) as f32
 }
 #[inline(always)]
 pub fn celt_log2_db(x: f32) -> f32 {

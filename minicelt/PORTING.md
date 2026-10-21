@@ -97,10 +97,11 @@ bit-exact comparison below. What was removed or specialized:
   bit-reversal tables by `compute_bitrev_table` (`kiss_fft::init_fft`). They live in `.bss`.
   `scripts/gen_tables.py` checks that the rules reproduce libopus' tables bit for bit. The MDCT twiddles and the
   window are not derivable bit-exactly (the C tables are not correctly rounded libm values) and stay.
-- libm: `sqrt` and `floor` are the wasm instructions (`arch::sqrt64`, `arch::floor64`);
-  `celt_cos_norm` is the part of libm's `cos` that its angles reach, and `acos64` libm's `acos`
-  with the hardware `sqrt` (both bit for bit equal to `libm`'s, checked exhaustively over the
-  inputs they can see). Only `log` and `exp` are still `libm`'s.
+- libm (no longer a dependency): `sqrt` and `floor` are the wasm instructions (`mathops::sqrt64`,
+  `mathops::floor64`); `celt_cos_norm` is the part of libm's `cos` that its angles reach, `acos64`
+  libm's `acos` with the hardware `sqrt`, `celt_log2` libm's `log` for positive normal `f32` (reduced
+  on the `f32` bits) and `celt_exp2` libm's `exp` for `0 <= x <= 4` (no special cases, no `scalbn`).
+  All four are bit for bit equal to `libm`'s, checked exhaustively over the inputs they can see.
 - Bounds checks: where the compiler can be given a proof (constant indices into fixed arrays, masks,
   `match` on a bounded value, iterators, `chunks_exact`, a re-slice hoisted out of the loop) the code uses
   plain indexing, which is checked in every profile and adds no check in a per-sample loop. Where it
@@ -179,13 +180,13 @@ as the `coverage` job (log only, never fails the workflow, nothing uploaded). Th
   variable, `floor()`, `log()`, `sqrt()`, `exp()`, `cos()`, ...). Reproduce the
   exact precision of every operation with `as f64`/`as f32`; `int` operands
   combined with `float` become `float`. Getting this wrong shows up as a
-  bit-exactness failure. libm functions: `libm::` (double: `exp`, `log`) or the
-  `arch`/`mathops` equivalents (see Trimming), exactly the precision C calls.
+  bit-exactness failure. libm functions: the `mathops` equivalents (see Trimming),
+  exactly the precision C calls.
 - Rust does not contract `a * b + c` into an FMA, and the reference is built
   with `-ffp-contract=off`, so plain expressions match. Never hand-vectorize a
   plain C loop to imitate compiler output.
 - C `(int)x` on a float truncates; Rust `x as i32` truncates and saturates.
-  `float2int` (`lrintf`) would be `libm::rintf` (round half to even); the encoder does not
+  `float2int` (`lrintf`) would be round half to even (`libm::rintf`); the encoder does not
   use it.
   `floor(.5+x)` stays exactly that.
 - Arrays: prefer slices (`&[f32]`, `&mut [i32]`), indexed plainly where the bounds are provable and

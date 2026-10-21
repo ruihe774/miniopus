@@ -7,9 +7,6 @@ edition = "2024"
 doctest = false
 test = false
 
-[dependencies]
-libm = "0.2.16"
-
 [features]
 # Track the high-water mark of the pseudostack (see src/stack.rs); measurement only.
 stack-peak = []
