@@ -39,15 +39,18 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 // SAFETY (all accessors): wasm32-unknown-unknown here is single-threaded and the exports are
 // not re-entrant, so these statics are never aliased.
 fn enc() -> &'static mut OpusEncoder {
+    // UNSAFE-MAND: `&mut` to a `static mut`.
     unsafe { &mut *addr_of_mut!(ENCODER) }
 }
 
 fn channels() -> usize {
+    // UNSAFE-EASY: make CHANNELS an `AtomicUsize` (relaxed), here and in `minicelt_init`.
     unsafe { *addr_of_mut!(CHANNELS) }
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_init(channels: i32, bitrate: i32, complexity: i32, vbr_constraint: i32, dtx: i32) -> i32 {
+    // UNSAFE-EASY: `AtomicUsize` store, see `channels`.
     unsafe { *addr_of_mut!(CHANNELS) = 0 };
     let e = enc();
     let mut r = e.init(channels);
@@ -65,73 +68,77 @@ pub extern "C" fn minicelt_init(channels: i32, bitrate: i32, complexity: i32, vb
     }
     // Leave the encoder unusable unless every setting was accepted.
     if r >= 0 {
+        // UNSAFE-EASY: `AtomicUsize` store, see `channels`.
         unsafe { *addr_of_mut!(CHANNELS) = channels as usize };
     }
     r
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_set_bitrate(v: i32) -> i32 {
     enc().set_bitrate(v)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_set_complexity(v: i32) -> i32 {
     enc().set_complexity(v)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_set_vbr_constraint(v: i32) -> i32 {
     enc().set_vbr_constraint(v)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_set_dtx(v: i32) -> i32 {
     enc().set_dtx(v)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_set_packet_loss_perc(v: i32) -> i32 {
     enc().set_packet_loss_perc(v)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_set_bandwidth(v: i32) -> i32 {
     enc().set_bandwidth(v)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_input_ptr() -> *mut f32 {
     addr_of_mut!(INPUT) as *mut f32
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_input_i16_ptr() -> *mut i16 {
     addr_of_mut!(INPUT) as *mut i16
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_output_ptr() -> *const u8 {
     addr_of_mut!(OUTPUT) as *const u8
 }
 
 /// Encodes `960 * channels` interleaved samples from `minicelt_input_ptr()`.
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_encode() -> i32 {
     if channels() == 0 {
         return -1; /* OPUS_BAD_ARG: not initialised */
     }
+    // UNSAFE-WIDE-MAND: only the two `&mut *addr_of_mut!(..)` derefs of the statics need `unsafe`.
     unsafe { enc().encode_float(&mut *addr_of_mut!(INPUT), &mut *addr_of_mut!(OUTPUT), 24) }
 }
 
 /// Encodes `960 * channels` interleaved samples from `minicelt_input_i16_ptr()` (opus_encode:
 /// INT16TORES scaling, 16-bit depth).
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_encode_i16() -> i32 {
     let n = FRAME * channels();
     if n == 0 {
         return -1; /* OPUS_BAD_ARG: not initialised */
     }
+    // UNSAFE-WIDE-MAND: the `&mut *addr_of_mut!(..)` derefs of the statics in the last line need `unsafe`; the in-place
+    // i16 -> f32 loop is UNSAFE-EASY (read the i16 out of the f32 word `i / 2` with `to_bits`, going from the end).
     unsafe {
         let f = addr_of_mut!(INPUT) as *mut f32;
         let q = f as *const i16;
@@ -144,24 +151,24 @@ pub extern "C" fn minicelt_encode_i16() -> i32 {
 }
 
 /// OPUS_GET_LOOKAHEAD: Fs/400 samples (no delay compensation for RESTRICTED_CELT).
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_lookahead() -> i32 {
     120
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_final_range() -> u32 {
     enc().get_final_range()
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_in_dtx() -> i32 {
     enc().get_in_dtx()
 }
 
 /// Pseudostack high-water mark in bytes (measurement builds only: `--features stack-peak`).
 #[cfg(feature = "stack-peak")]
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_stack_peak() -> u32 {
     minicelt::stack::peak() as u32
 }

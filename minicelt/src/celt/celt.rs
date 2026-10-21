@@ -29,6 +29,7 @@ static gains: [[f32; 3]; 3] = [
 /// # Safety
 /// `x` must have `max(T0,T1,15)+2` readable floats before it and `N` after it; `y` must have
 /// `N` writable floats. `y == x` (in place) is allowed; the regions otherwise must not overlap.
+// UNSAFE-PERF: raw pointers with negative offsets (and in-place `y == x`) instead of bounds-checked slices.
 pub unsafe fn comb_filter(
     y: *mut f32,
     x: *const f32,
@@ -40,6 +41,8 @@ pub unsafe fn comb_filter(
     tapset0: i32,
     tapset1: i32,
 ) {
+    // UNSAFE-WIDE-PERF: only the `*x.offset(..)`/`*y.offset(..)` accesses and the `copy`/`comb_filter_const`
+    // calls need `unsafe`, not the gain setup.
     unsafe {
         if g0 == 0.0 && g1 == 0.0 {
             /* OPT: Happens to work without the OPUS_MOVE(), but only because the current encoder already copies x to y */

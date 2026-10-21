@@ -19,6 +19,7 @@ CELT_PVQ_U_ROW holds the offsets of the rows in CELT_PVQ_U_DATA (CWRS_EXTRA_ROWS
 /// binary (it lives in `.bss`).
 struct PvqU(UnsafeCell<[u32; 1272]>);
 // SAFETY: written only by `init_cwrs`, single-threaded use only (as the pseudostack).
+// UNSAFE-MAND: `UnsafeCell` statics need a manual `Sync` impl.
 unsafe impl Sync for PvqU {}
 static CELT_PVQ_U_DATA: PvqU = PvqU(UnsafeCell::new([0; 1272]));
 static CELT_PVQ_U_ROW: [u16; 15] = [
@@ -36,6 +37,7 @@ static CELT_PVQ_U_LAST: [u8; 15] = [
 /// written; the other C entries are never read).
 pub fn init_cwrs() {
     // SAFETY: nothing reads the table while it is rebuilt (init only).
+    // UNSAFE-MAND: `&mut` to the `UnsafeCell` static.
     let data = unsafe { &mut *CELT_PVQ_U_DATA.0.get() };
     let mut row = [0u32; 177];
     row[0] = 1;
@@ -66,6 +68,7 @@ fn CELT_PVQ_U(_n: i32, _k: i32) -> u32 {
     // Re-measured at opt-level 2 / inline-threshold=0: clamp +0.1..+0.6 % (wasm2) / +0.1..+0.7 % (wasm3),
     // +88 B; `get` form +0.1..+0.3 % / 0..+0.4 %, +122 B. Same verdict.
     // SAFETY: init_cwrs ran before the first encode; the table is only read here.
+    // UNSAFE-PERF: the two `get_unchecked`s (see IX-HARD above); the `UnsafeCell` read is UNSAFE-MAND.
     let (lo, hi) = (imin(_n, _k) as usize, imax(_n, _k) as usize);
     debug_assert!(lo < CELT_PVQ_U_ROW.len());
     unsafe {

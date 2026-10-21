@@ -22,6 +22,7 @@ fn ec_write_byte(this: &mut ec_enc, value: u32) -> i32 {
     if this.offs.wrapping_add(this.end_offs) >= this.storage {
         return -1;
     }
+    // UNSAFE-MAND: write through the raw `buf` pointer (`ec_enc` stays `Copy` for state save/restore).
     unsafe { *this.buf.add(this.offs as usize) = value as u8 };
     this.offs += 1;
     0
@@ -32,6 +33,7 @@ fn ec_write_byte_at_end(this: &mut ec_enc, value: u32) -> i32 {
         return -1;
     }
     this.end_offs += 1;
+    // UNSAFE-MAND: as `ec_write_byte`.
     unsafe { *this.buf.add((this.storage - this.end_offs) as usize) = value as u8 };
     0
 }
@@ -137,6 +139,7 @@ pub fn ec_enc_bit_logp(this: &mut ec_enc, val: i32, logp: u32) {
 
 pub fn ec_enc_icdf(this: &mut ec_enc, s: i32, icdf: &[u8], ftb: u32) {
     debug_assert!((s as usize) < icdf.len());
+    // UNSAFE-PERF: calls the unchecked `ec_enc_icdf_ptr` (only a debug_assert guards `s`).
     unsafe { ec_enc_icdf_ptr(this, s, icdf.as_ptr(), ftb) }
 }
 
@@ -144,8 +147,10 @@ pub fn ec_enc_icdf(this: &mut ec_enc, s: i32, icdf: &[u8], ftb: u32) {
 ///
 /// # Safety
 /// `icdf` must be valid for reads of indices `s-1` and `s`.
+// UNSAFE-PERF: unchecked table reads; a `&[u8]` parameter would bounds-check them.
 pub unsafe fn ec_enc_icdf_ptr(this: &mut ec_enc, s: i32, icdf: *const u8, ftb: u32) {
     let r = this.rng >> ftb;
+    // UNSAFE-PERF: see the function comment (the only reads are the three `*icdf` loads).
     unsafe {
         if s > 0 {
             let a = *icdf.add(s as usize - 1) as u32;
@@ -201,6 +206,7 @@ pub fn ec_enc_bits(this: &mut ec_enc, fl: u32, bits: u32) {
 #[inline(always)]
 pub fn ec_enc_shrink(this: &mut ec_enc, size: u32) {
     debug_assert!(this.offs + this.end_offs <= size);
+    // UNSAFE-MAND: moves bytes within the raw `buf` pointer (see `ec_write_byte`).
     unsafe {
         core::ptr::copy(
             this.buf.add((this.storage - this.end_offs) as usize),
@@ -242,6 +248,7 @@ pub fn ec_enc_done(this: &mut ec_enc) {
     /* Clear any excess space and add any remaining extra bits to the last byte. */
     if this.error == 0 {
         if !this.buf.is_null() {
+            // UNSAFE-MAND: clears bytes through the raw `buf` pointer (see `ec_write_byte`).
             unsafe {
                 core::ptr::write_bytes(
                     this.buf.add(this.offs as usize),
@@ -262,6 +269,7 @@ pub fn ec_enc_done(this: &mut ec_enc) {
                     window &= (1u32 << l) - 1;
                     this.error = -1;
                 }
+                // UNSAFE-MAND: write through the raw `buf` pointer (see `ec_write_byte`).
                 unsafe {
                     *this.buf.add((this.storage - this.end_offs - 1) as usize) |= window as u8;
                 }

@@ -41,6 +41,7 @@ struct Scratch {
 }
 
 // SAFETY: single-threaded use only, as with NONTHREADSAFE_PSEUDOSTACK in C.
+// UNSAFE-MAND: `UnsafeCell` statics need a manual `Sync` impl.
 unsafe impl Sync for Scratch {}
 
 static SCRATCH: Scratch = Scratch {
@@ -54,9 +55,11 @@ static SCRATCH: Scratch = Scratch {
 ///
 /// # Safety
 /// Implementors must be plain data with no invalid bit patterns and no padding.
+// UNSAFE-MAND: an unsafe marker trait is the contract that makes `alloc` sound.
 pub unsafe trait Pod: Copy {}
 
 macro_rules! pod {
+    // UNSAFE-MAND: implementing the unsafe trait `Pod`.
     ($($t:ty),*) => { $(unsafe impl Pod for $t {})* };
 }
 pod!(
@@ -72,6 +75,7 @@ pod!(
     f64,
     core::arch::wasm32::v128
 );
+// UNSAFE-MAND: implementing the unsafe trait `Pod`.
 unsafe impl<T: Pod, const N: usize> Pod for [T; N] {}
 
 /// SAVE_STACK; dropping it is RESTORE_STACK.
@@ -84,6 +88,7 @@ pub struct StackGuard {
 #[inline(always)]
 pub fn save() -> StackGuard {
     StackGuard {
+        // UNSAFE-EASY: make `top` (and `peak`) an `AtomicUsize` with relaxed loads/stores (plain accesses on wasm32).
         saved: unsafe { *SCRATCH.top.get() },
         _not_send: PhantomData,
     }
@@ -94,6 +99,8 @@ impl StackGuard {
     #[inline(always)]
     #[allow(clippy::mut_from_ref)]
     pub fn alloc<T: Pod>(&self, n: usize) -> &mut [T] {
+        // UNSAFE-WIDE-MAND: only the final `from_raw_parts_mut` needs `unsafe` (handing out `&mut` from
+        // `&self`); the `top`/`peak` bookkeeping is UNSAFE-EASY with atomics.
         unsafe {
             let top = &mut *SCRATCH.top.get();
             let base = SCRATCH.buf.get() as *mut u8;
@@ -118,6 +125,7 @@ impl StackGuard {
 impl Drop for StackGuard {
     #[inline(always)]
     fn drop(&mut self) {
+        // UNSAFE-EASY: `AtomicUsize` store, see `save`.
         unsafe { *SCRATCH.top.get() = self.saved }
     }
 }
@@ -125,5 +133,6 @@ impl Drop for StackGuard {
 /// High-water mark of the scratch buffer in bytes (`stack-peak` feature only).
 #[cfg(feature = "stack-peak")]
 pub fn peak() -> usize {
+    // UNSAFE-EASY: `AtomicUsize` load, see `save`.
     unsafe { *SCRATCH.peak.get() }
 }

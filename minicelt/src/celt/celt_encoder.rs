@@ -1349,6 +1349,7 @@ pub fn run_prefilter(
     for c in 0..ccu {
         in_c[c][..OVU].copy_from_slice(&im_c[c]);
         before[c] = abs_sum(&in_c[c][OVU..]);
+        // UNSAFE-PERF: calls the unsafe `comb_filter` (raw-pointer kernel, see celt.rs).
         unsafe {
             comb_filter(
                 in_c[c].as_mut_ptr().add(OVU),
@@ -1386,6 +1387,7 @@ pub fn run_prefilter(
     if cancel_pitch {
         for c in 0..ccu {
             in_c[c][OVU..].copy_from_slice(&pre_c[c][MP..]);
+            // UNSAFE-PERF: calls the unsafe `comb_filter` (raw-pointer kernel, see celt.rs).
             unsafe {
                 comb_filter(
                     in_c[c].as_mut_ptr().add(OVU),

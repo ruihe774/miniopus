@@ -40,6 +40,7 @@ struct FftTables {
 }
 struct Tables(core::cell::UnsafeCell<FftTables>);
 // SAFETY: written only by `init_fft`, single-threaded use only (as the pseudostack).
+// UNSAFE-MAND: `UnsafeCell` statics need a manual `Sync` impl.
 unsafe impl Sync for Tables {}
 static TABLES: Tables = Tables(core::cell::UnsafeCell::new(FftTables {
     twiddles: [kiss_twiddle_cpx { r: 0.0, i: 0.0 }; 480],
@@ -50,6 +51,7 @@ static TABLES: Tables = Tables(core::cell::UnsafeCell::new(FftTables {
 #[inline(always)]
 fn twiddles() -> &'static [kiss_twiddle_cpx; 480] {
     // SAFETY: init_fft ran before the first encode; the tables are only read afterwards.
+    // UNSAFE-MAND: reading through the `UnsafeCell` static (the tables are filled at runtime).
     unsafe { &(*TABLES.0.get()).twiddles }
 }
 
@@ -57,6 +59,7 @@ fn twiddles() -> &'static [kiss_twiddle_cpx; 480] {
 #[inline(always)]
 pub fn bitrev(shift: i32) -> &'static [i16] {
     // SAFETY: as `twiddles`.
+    // UNSAFE-WIDE-MAND: only the two `&(*TABLES.0.get()).bitrevNN` derefs need `unsafe`, not the `if`.
     unsafe {
         if shift == 0 {
             &(*TABLES.0.get()).bitrev480
@@ -90,6 +93,7 @@ pub fn init_fft() {
         fft_state48000_960_0, fft_state48000_960_3, fft_twiddles48000_960 as octant,
     };
     // SAFETY: nothing reads the tables while they are rebuilt (init only).
+    // UNSAFE-MAND: `&mut` to the `UnsafeCell` static.
     let t = unsafe { &mut *TABLES.0.get() };
     let tw = &mut t.twiddles;
     let cpx = |r: f32, i: f32| kiss_twiddle_cpx { r, i };
@@ -115,6 +119,7 @@ pub fn init_fft() {
 }
 
 // SAFETY: repr(C) pair of f32, no padding, every bit pattern valid.
+// UNSAFE-MAND: implementing the unsafe trait `Pod`.
 unsafe impl crate::stack::Pod for kiss_fft_cpx {}
 
 /* The complex-math macros of _kiss_fft_guts.h (float build). Order of operations is kept. */

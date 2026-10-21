@@ -23,6 +23,7 @@ fn WASM_F32X4_MADD(a: v128, b: v128, c: v128) -> v128 {
 }
 
 /// Unaligned 4-float load. The caller guarantees `p[0..4]` is readable.
+// UNSAFE-MAND: `v128_load` is an unsafe intrinsic (a safe load would need a bounds-checked copy or `f32x4(..)`).
 #[inline(always)]
 unsafe fn ld(p: *const f32) -> v128 {
     unsafe { v128_load(p as *const v128) }
@@ -54,6 +55,7 @@ pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
     debug_assert!(x.len() >= n && y.len() >= n);
     let (px, py) = (x.as_ptr(), y.as_ptr());
     // SAFETY: every vector load reads 4 floats at an index i with i + 4 <= n.
+    // UNSAFE-WIDE-PERF: only the `ld` calls (unchecked pointer loads) need `unsafe`, not the hsum or the scalar tail.
     unsafe {
         let mut i = 0usize;
         let mut sum0 = f32x4_splat(0.0);
@@ -77,6 +79,7 @@ pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
 
 /* Returns {sum_j x[j]*y[j+k], k=0..3}. Reads y[0..len+2]. */
 #[inline(always)]
+// UNSAFE-PERF: unchecked pointer loads instead of bounds-checked slices.
 unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
     unsafe {
         let mut sum0 = f32x4_splat(0.0);
@@ -113,6 +116,7 @@ pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max
     let (px, py, po) = (_x.as_ptr(), _y.as_ptr(), xcorr.as_mut_ptr());
     // SAFETY: the C kernel's accesses stay within _x[0..len], _y[0..len+max_pitch-1] and
     // xcorr[0..max_pitch]; checked by the asserts above.
+    // UNSAFE-PERF: unchecked pointer loads/stores instead of bounds-checked slices.
     unsafe {
         let mut i = 0usize;
         /* Eight lags at a time, like the AVX2 version: one partial inner product
@@ -170,6 +174,7 @@ pub fn dual_inner_prod(x: &[f32], y01: &[f32], y02: &[f32], N: i32, xy1: &mut f3
     debug_assert!(x.len() >= n && y01.len() >= n && y02.len() >= n);
     let (px, p1, p2) = (x.as_ptr(), y01.as_ptr(), y02.as_ptr());
     // SAFETY: every vector load reads 4 floats at an index i with i + 4 <= n.
+    // UNSAFE-WIDE-PERF: only the `ld` calls (unchecked pointer loads) need `unsafe`, not the hsums or the scalar tail.
     unsafe {
         let mut i = 0usize;
         let mut sum1a = f32x4_splat(0.0);
@@ -210,6 +215,7 @@ pub fn dual_inner_prod(x: &[f32], y01: &[f32], y02: &[f32], N: i32, xy1: &mut f3
 /// `x` must have `T+2` readable floats before it and `N` (plus up to 3 for the vector
 /// tail-free loads: reads reach `x[N-T+1]`, `x[N-1]`) after it; `y` must have `N` writable
 /// floats. `y == x` (in place) is allowed, with `T >= COMBFILTER_MINPERIOD`, as in C.
+// UNSAFE-PERF: raw pointers with negative offsets (and in-place `y == x`) instead of bounds-checked slices.
 pub unsafe fn comb_filter_const(
     y: *mut f32,
     x: *const f32,
@@ -219,6 +225,7 @@ pub unsafe fn comb_filter_const(
     g11: f32,
     g12: f32,
 ) {
+    // UNSAFE-PERF: see the function comment.
     unsafe {
         let T = T as isize;
         let mut i: isize = 0;

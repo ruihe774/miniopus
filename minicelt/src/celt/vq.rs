@@ -153,6 +153,8 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
     let mut pulsesLeft: i32;
     // SAFETY: all vector accesses stay within y[0..N+8], X[0..N+8], signy/iy[0..(N+3)&~3]
     // and _X[0..N], as in the C kernel.
+    // UNSAFE-WIDE-PERF: unchecked pointer loads/stores/indexing, but the block also holds plenty of safe
+    // scalar and register code; only the `v128_load`/`v128_store`s and `*p.add(i)` accesses need `unsafe`.
     unsafe {
         /* Copy the last partial vector of _X into a zero-padded X; the full
         vectors are read from _X directly below. */

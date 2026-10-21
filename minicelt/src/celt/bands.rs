@@ -33,11 +33,13 @@ fn FRAC_MUL16(a: i32, b: i32) -> i32 {
 }
 
 #[inline(always)]
+// UNSAFE-MAND: `from_raw_parts_mut`. Its callers are the raw-pointer plumbing below, all UNSAFE-EASY (pass `&mut [f32]` / offsets into `norm` instead).
 unsafe fn slice_mut<'a>(p: *mut f32, n: i32) -> &'a mut [f32] {
     unsafe { core::slice::from_raw_parts_mut(p, n as usize) }
 }
 
 #[inline(always)]
+// UNSAFE-MAND: `from_raw_parts`; see `slice_mut`.
 unsafe fn slice<'a>(p: *const f32, n: i32) -> &'a [f32] {
     unsafe { core::slice::from_raw_parts(p, n as usize) }
 }
@@ -364,6 +366,7 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let (N0, stride) = (N0 as usize, stride as usize);
     // SAFETY: the indices are in range as in the C code (`tmp` has N = N0 * stride entries, X at least N, the
     // `ordery_table` row has `stride` entries); the `debug_assert!`s check them in the `checked` profile.
+    // UNSAFE-PERF: the `get_unchecked`s (see IX-HARD above).
     unsafe {
         debug_assert!(X.len() >= N);
         if hadamard != 0 {
@@ -413,6 +416,7 @@ pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
             // SAFETY: the callers pass X with at least `2 * N0 * stride` entries (N0 halved above), as in the
             // C code; the `debug_assert!` checks it in the `checked` profile.
             debug_assert!(a < X.len() && b < X.len());
+            // UNSAFE-PERF: the `get_unchecked`s (see IX-HARD above).
             unsafe {
                 let tmp1 = 0.70710678f32 * *X.get_unchecked(a);
                 let tmp2 = 0.70710678f32 * *X.get_unchecked(b);
@@ -478,6 +482,7 @@ pub struct split_ctx {
 
 /// # Safety
 /// `X` and `Y` must each be valid for `N` floats and not overlap; `ctx.ec` must be valid.
+// UNSAFE-EASY: take `X`/`Y` as `&mut [f32]` (the two halves of one band: `split_at_mut`) and `ctx.ec` as a `&mut`.
 unsafe fn compute_theta(
     ctx: &mut band_ctx,
     sctx: &mut split_ctx,
@@ -499,6 +504,7 @@ unsafe fn compute_theta(
 
     let i = ctx.i;
     let intensity = ctx.intensity;
+    // UNSAFE-EASY: hold `&'a mut ec_ctx` in `band_ctx` instead of a raw pointer.
     let ec = unsafe { &mut *ctx.ec };
     let bandE = ctx.bandE;
 
@@ -518,6 +524,7 @@ unsafe fn compute_theta(
     side and mid. With just that parameter, we can re-scale both
     mid and side because we know that 1) they have unit norm and
     2) they are orthogonal. */
+    // UNSAFE-EASY: only needed for `slice` on the raw pointers; see `compute_theta`.
     let itheta_q30 = unsafe { stereo_itheta(slice(X, N), slice(Y, N), stereo, N) };
     itheta = itheta_q30 >> 16;
     let tell = ec_tell_frac(ec) as i32;
@@ -594,6 +601,7 @@ unsafe fn compute_theta(
         debug_assert!(itheta >= 0);
         itheta = celt_udiv((itheta * 16384) as u32, qn as u32) as i32;
         if stereo != 0 {
+            // UNSAFE-EASY: only needed for `slice`/`slice_mut` on the raw pointers; see `compute_theta`.
             unsafe {
                 if itheta == 0 {
                     intensity_stereo(slice_mut(X, N), slice(Y, N), bandE, i, N);
@@ -608,9 +616,11 @@ unsafe fn compute_theta(
         inv = (itheta > 8192) as i32;
         if inv != 0 {
             for j in 0..N as usize {
+                // UNSAFE-EASY: raw-pointer access, see `compute_theta`.
                 unsafe { *Y.add(j) = -*Y.add(j) };
             }
         }
+        // UNSAFE-EASY: only needed for `slice`/`slice_mut` on the raw pointers; see `compute_theta`.
         unsafe { intensity_stereo(slice_mut(X, N), slice(Y, N), bandE, i, N) };
         if *b > 2 << BITRES && ctx.remaining_bits > 2 << BITRES {
             ec_enc_bit_logp(ec, inv, 2);
@@ -650,6 +660,7 @@ unsafe fn compute_theta(
 
 /// # Safety
 /// `X`, and `Y` and `lowband_out` when non-null, must be valid for one float; `ctx.ec` valid.
+// UNSAFE-EASY: take `X`/`Y`/`lowband_out` as `&mut [f32]`/`Option<..>`.
 unsafe fn quant_band_n1(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -657,22 +668,26 @@ unsafe fn quant_band_n1(
     lowband_out: *mut f32,
 ) -> u32 {
     let mut x = X;
+    // UNSAFE-EASY: raw `ctx.ec`, see `compute_theta`.
     let ec = unsafe { &mut *ctx.ec };
 
     let stereo = !Y.is_null() as i32;
     for _c in 0..1 + stereo {
         let mut sign = 0;
         if ctx.remaining_bits >= 1 << BITRES {
+            // UNSAFE-EASY: raw-pointer read, see `quant_band_n1`.
             sign = unsafe { (*x < 0.0) as i32 };
             ec_enc_bits(ec, sign as u32, 1);
             ctx.remaining_bits -= 1 << BITRES;
         }
         if ctx.resynth != 0 {
+            // UNSAFE-EASY: raw-pointer write, see `quant_band_n1`.
             unsafe { *x = if sign != 0 { -1.0 } else { 1.0 } };
         }
         x = Y;
     }
     if !lowband_out.is_null() {
+        // UNSAFE-EASY: raw-pointer access, see `quant_band_n1`.
         unsafe { *lowband_out = *X };
     }
     1
@@ -700,6 +715,7 @@ the two half-bands. It can be called recursively so bands can end up being
 split in 8 parts. */
 /// # Safety
 /// `X` must be valid for `N` floats, `lowband` (if non-null) for `N` floats, not overlapping X.
+// UNSAFE-EASY: take `X` as `&mut [f32]` (halves via `split_at_mut`) and `lowband` as `Option<&[f32]>`.
 unsafe fn quant_partition(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -723,6 +739,7 @@ unsafe fn quant_partition(
         let mut next_lowband2: *mut f32 = ptr::null_mut();
 
         N >>= 1;
+        // UNSAFE-EASY: `X.add(N)` is the second half, `split_at_mut`.
         let Y = unsafe { X.add(N as usize) };
         LM -= 1;
         if B == 1 {
@@ -730,6 +747,7 @@ unsafe fn quant_partition(
         }
         B = (B + 1) >> 1;
 
+        // UNSAFE-EASY: call of the unsafe `compute_theta`.
         unsafe { compute_theta(ctx, &mut sctx, X, Y, N, &mut b, B, B0, LM, 0, &mut fill) };
         let imid = sctx.imid;
         let iside = sctx.iside;
@@ -754,10 +772,12 @@ unsafe fn quant_partition(
         ctx.remaining_bits -= qalloc;
 
         if !lowband.is_null() {
+            // UNSAFE-EASY: `lowband.add(N)` is a sub-slice (or `wrapping_add` as in `quant_all_bands`).
             next_lowband2 = unsafe { lowband.add(N as usize) }; /* >32-bit split case */
         }
 
         let mut rebalance = ctx.remaining_bits;
+        // UNSAFE-EASY: calls of the unsafe `quant_partition`.
         unsafe {
             if mbits >= sbits {
                 cm = quant_partition(ctx, X, N, mbits, B, lowband, LM, gain * mid, fill);
@@ -813,6 +833,7 @@ unsafe fn quant_partition(
             let K = get_pulses(q);
 
             /* Finally do the actual quantization */
+            // UNSAFE-EASY: `slice_mut`/`&mut *ctx.ec` on raw pointers, see `compute_theta`.
             cm = unsafe {
                 alg_quant(
                     slice_mut(X, N),
@@ -832,6 +853,7 @@ unsafe fn quant_partition(
                 16-bit platform; use a long to get defined behavior.*/
                 let cm_mask: u32 = (1u32 << B) - 1;
                 fill = (fill as u32 & cm_mask) as i32;
+                // UNSAFE-EASY: `slice_mut` on a raw pointer.
                 let x = unsafe { slice_mut(X, N) };
                 if fill == 0 {
                     x.fill(0.0);
@@ -845,6 +867,7 @@ unsafe fn quant_partition(
                         cm = cm_mask;
                     } else {
                         /* Folded spectrum */
+                        // UNSAFE-EASY: `slice` on a raw pointer.
                         let lowband = unsafe { slice(lowband, N) };
                         for (v, &l) in x.iter_mut().zip(lowband) {
                             ctx.seed = celt_lcg_rand(ctx.seed);
@@ -868,6 +891,7 @@ unsafe fn quant_partition(
 /// # Safety
 /// `X` valid for `N` floats; `lowband`, `lowband_out`, `lowband_scratch` (each nullable) valid
 /// for `N` floats; `lowband_scratch` must not overlap `X` or `lowband`.
+// UNSAFE-EASY: slices/offsets instead of raw pointers (`lowband` and `lowband_out` both point into `norm`, so pass `norm` plus offsets).
 unsafe fn quant_band(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -897,6 +921,7 @@ unsafe fn quant_band(
 
     /* Special case for one sample */
     if N == 1 {
+        // UNSAFE-EASY: call of the unsafe `quant_band_n1`.
         return unsafe { quant_band_n1(ctx, X, ptr::null_mut(), lowband_out) };
     }
 
@@ -909,12 +934,14 @@ unsafe fn quant_band(
         && !lowband.is_null()
         && (recombine != 0 || ((N_B & 1) == 0 && tf_change < 0) || B0 > 1)
     {
+        // UNSAFE-EASY: `ptr::copy` of a band is `copy_from_slice` on slices.
         unsafe { ptr::copy(lowband, lowband_scratch, N as usize) };
         lowband = lowband_scratch;
     }
 
     for k in 0..recombine {
         static bit_interleave_table: [u8; 16] = [0, 1, 1, 1, 2, 3, 3, 3, 2, 3, 3, 3, 2, 3, 3, 3];
+        // UNSAFE-EASY: `slice_mut`/`slice` on raw pointers and calls of safe fns.
         unsafe {
             haar1(slice_mut(X, N), N >> k, 1 << k);
             if !lowband.is_null() {
@@ -929,6 +956,7 @@ unsafe fn quant_band(
 
     /* Increasing the time resolution */
     while (N_B & 1) == 0 && tf_change < 0 {
+        // UNSAFE-EASY: `slice_mut`/`slice` on raw pointers and calls of safe fns.
         unsafe {
             haar1(slice_mut(X, N), N_B, B);
             if !lowband.is_null() {
@@ -946,6 +974,7 @@ unsafe fn quant_band(
 
     /* Reorganize the samples in time order instead of frequency order */
     if B0 > 1 {
+        // UNSAFE-EASY: `slice_mut`/`slice` on raw pointers and calls of safe fns.
         unsafe {
             deinterleave_hadamard(
                 slice_mut(X, N),
@@ -964,10 +993,12 @@ unsafe fn quant_band(
         }
     }
 
+    // UNSAFE-EASY: call of the unsafe `quant_partition`.
     cm = unsafe { quant_partition(ctx, X, N, b, B, lowband, LM, gain, fill) };
 
     /* This code is used by the decoder and by the resynthesis-enabled encoder */
     if ctx.resynth != 0 {
+        // UNSAFE-EASY: `slice_mut` on a raw pointer.
         let x = unsafe { slice_mut(X, N) };
         /* Undo the sample reorganization going from time order to frequency order */
         if B0 > 1 {
@@ -997,6 +1028,7 @@ unsafe fn quant_band(
         /* Scale output for later folding */
         if !lowband_out.is_null() {
             let n: f32 = sqrt64(N0 as f64) as f32;
+            // UNSAFE-EASY: `slice_mut` on a raw pointer.
             let lowband_out = unsafe { slice_mut(lowband_out, N0) };
             for (o, &v) in lowband_out.iter_mut().zip(x.iter()) {
                 *o = n * v;
@@ -1012,6 +1044,7 @@ const MIN_STEREO_ENERGY: f32 = 1e-10;
 /* This function is responsible for encoding and decoding a band for the stereo case. */
 /// # Safety
 /// As `quant_band`, plus `Y` valid for `N` floats and disjoint from `X`.
+// UNSAFE-EASY: as `quant_band`, with `X`/`Y` as two `&mut [f32]`.
 unsafe fn quant_band_stereo(
     ctx: &mut band_ctx,
     X: *mut f32,
@@ -1032,6 +1065,7 @@ unsafe fn quant_band_stereo(
 
     /* Special case for one sample */
     if N == 1 {
+        // UNSAFE-EASY: call of the unsafe `quant_band_n1`.
         return unsafe { quant_band_n1(ctx, X, Y, lowband_out) };
     }
 
@@ -1043,6 +1077,7 @@ unsafe fn quant_band_stereo(
             ctx.bandE[(modes::nbEBands + ctx.i) as usize],
         );
         if bi < MIN_STEREO_ENERGY || bs < MIN_STEREO_ENERGY {
+            // UNSAFE-EASY: `ptr::copy` between the disjoint `X` and `Y` is `copy_from_slice`.
             unsafe {
                 if bi > bs {
                     ptr::copy(X, Y, N as usize);
@@ -1052,6 +1087,7 @@ unsafe fn quant_band_stereo(
             }
         }
     }
+    // UNSAFE-EASY: call of the unsafe `compute_theta`.
     unsafe { compute_theta(ctx, &mut sctx, X, Y, N, &mut b, B, B, LM, 1, &mut fill) };
     let inv = sctx.inv;
     let imid = sctx.imid;
@@ -1079,6 +1115,7 @@ unsafe fn quant_band_stereo(
 
         let x2 = if c { Y } else { X };
         let y2 = if c { X } else { Y };
+        // UNSAFE-EASY: raw-pointer access to `X`/`Y` (the N == 2 swap is `if c { (Y, X) } else { (X, Y) }` on slices), calls of the unsafe `quant_band`.
         unsafe {
             if sbits != 0 {
                 /* Here we only need to encode a sign for the side. */
@@ -1127,6 +1164,7 @@ unsafe fn quant_band_stereo(
 
         let mut rebalance = ctx.remaining_bits;
         let null = ptr::null_mut();
+        // UNSAFE-EASY: calls of the unsafe `quant_band`.
         unsafe {
             if mbits >= sbits {
                 /* In stereo mode, we do not apply a scaling to the mid because we need the normalized
@@ -1180,6 +1218,7 @@ unsafe fn quant_band_stereo(
 
     /* This code is used by the decoder and by the resynthesis-enabled encoder */
     if ctx.resynth != 0 {
+        // UNSAFE-EASY: `slice_mut` and the raw-pointer sign flip.
         unsafe {
             if N != 2 {
                 stereo_merge(slice_mut(X, N), slice_mut(Y, N), mid, N);
@@ -1313,6 +1352,7 @@ pub fn quant_all_bands(
         };
         let N = M * eb(i + 1) - M * eb(i);
         debug_assert!(N > 0);
+        // UNSAFE-EASY: raw `ec`, see `compute_theta` (`ctx` would own the `&mut`).
         let tell = unsafe { ec_tell_frac(&*ec) } as i32;
 
         /* Compute how many bits we want to allocate to this band */
@@ -1412,6 +1452,7 @@ pub fn quant_all_bands(
                 n.wrapping_add((M * eb(i) - norm_offset) as usize)
             }
         };
+        // UNSAFE-EASY: raw-pointer plumbing and calls of the unsafe band functions (the two `copy_nonoverlapping`s of the raw `ec` buffer stay UNSAFE-MAND, see entenc.rs).
         unsafe {
             if dual_stereo != 0 {
                 x_cm = quant_band(
