@@ -42,22 +42,18 @@ unsafe fn slice<'a>(p: *const f32, n: i32) -> &'a [f32] {
     unsafe { core::slice::from_raw_parts(p, n as usize) }
 }
 
-// IX-HARD: `thresholds`/`hysteresis` indexed by `i` and `prev - 1` (previous decision, carried state).
-pub fn hysteresis_decision(val: f32, thresholds: &[f32], hysteresis: &[f32], N: i32, prev: i32) -> i32 {
-    let mut i = 0;
-    while i < N {
-        if val < thresholds.at(i as usize) {
-            break;
-        }
-        i += 1;
-    }
-    if i > prev && val < thresholds.at(prev as usize) + hysteresis.at(prev as usize) {
+/// `N` is the length of the tables; `prev` (the previous decision) is in `0..=N`.
+pub fn hysteresis_decision<const N: usize>(val: f32, thresholds: &[f32; N], hysteresis: &[f32; N], prev: i32) -> i32 {
+    let prev = prev as usize;
+    let mut i = thresholds.iter().position(|&t| val < t).unwrap_or(N);
+    /* i > prev and i < prev imply prev < N and 0 < prev <= N */
+    if i > prev && val < thresholds[prev] + hysteresis[prev] {
         i = prev;
     }
-    if i < prev && val > thresholds.at((prev - 1) as usize) - hysteresis.at((prev - 1) as usize) {
+    if i < prev && val > thresholds[prev - 1] - hysteresis[prev - 1] {
         i = prev;
     }
-    i
+    i as i32
 }
 
 /// Linear congruential generator (relies on unsigned wraparound).
@@ -105,20 +101,20 @@ pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], end: i32, C: i32) {
 }
 
 /// Normalise each band such that the energy is one.
-// IX-HARD: `freq`/`X` at `M * eBands[i] + j`: offsets from the band table, no length to prove them against.
-// The `bandE.at(i + c * nbEBands)` read (a per-channel re-slice would do) is left on `Ix` too: the function
-// keeps `Ix` for the other sites, and the conversion was not measured.
 pub fn normalise_bands(freq: &[f32], X: &mut [f32], bandE: &[f32], end: i32, C: i32) {
     /* M == 8 */
-    let M = 8;
+    let LM = 3;
     let eBands = modes::eBands;
-    let N = M * modes::shortMdctSize;
-    for c in 0..C {
-        for i in 0..end as usize {
-            let g: f32 = 1.0f32 / (1e-27f32 + bandE.at(i + (c * modes::nbEBands) as usize));
-            for j in M * eBands.at(i) as i32..M * eBands.at(i + 1) as i32 {
-                let k = (j + c * N) as usize;
-                *X.at_mut(k) = freq.at(k) * g;
+    let N = (modes::shortMdctSize << LM) as usize;
+    for c in 0..C as usize {
+        let freqc = &freq[c * N..][..N];
+        let Xc = &mut X[c * N..][..N];
+        let bandEc = &bandE[c * modes::nbEBands as usize..][..end as usize];
+        for (&e, b) in bandEc.iter().zip(eBands.windows(2)) {
+            let g: f32 = 1.0f32 / (1e-27f32 + e);
+            let r = (b[0] as usize) << LM..(b[1] as usize) << LM;
+            for (x, &f) in Xc[r.clone()].iter_mut().zip(&freqc[r]) {
+                *x = f * g;
             }
         }
     }
@@ -140,18 +136,17 @@ fn compute_channel_weights(mut Ex: f32, mut Ey: f32, w: &mut [f32; 2]) {
     w[1] = Ey;
 }
 
-// IX-HARD: `bandE.at(bandID)`/`at(bandID + nbEBands)`: `bandID` is the caller's band counter. The `X`/`Y`
-// loop over `N` (a re-slice to `N` would do) is left on `Ix` too, because the function keeps `Ix` for `bandE`
-// anyway; not measured.
 fn intensity_stereo(X: &mut [f32], Y: &[f32], bandE: &[f32], bandID: i32, N: i32) {
     let i = bandID as usize;
-    let left = bandE.at(i);
-    let right = bandE.at(i + modes::nbEBands as usize);
+    let left = bandE[i];
+    let right = bandE[i + modes::nbEBands as usize];
     let norm: f32 = super::arch::EPSILON + celt_sqrt(super::arch::EPSILON + left * left + right * right);
     let a1 = left / norm;
     let a2 = right / norm;
-    for j in 0..N as usize {
-        *X.at_mut(j) = a1 * X.at(j) + a2 * Y.at(j);
+    /* the callers pass X and Y with length N */
+    debug_assert!(X.len() == N as usize && Y.len() == N as usize);
+    for (x, &y) in X.iter_mut().zip(Y) {
+        *x = a1 * *x + a2 * y;
         /* Side is not encoded, no need to calculate */
     }
 }
@@ -192,9 +187,6 @@ fn stereo_merge(X: &mut [f32], Y: &mut [f32], mid: f32, N: i32) {
 }
 
 /// Decide whether we should spread the pulses in the current frame
-// IX-HARD: `x.at(j)` over `X.rg(M * eBands[i] + c * N0..)` (offset from the band table, and the per-sample
-// loop of this function) and `eBands.at(i)` (bounded only by the caller's `end`). `tcount[0..3]` (constant
-// indices into `[i32; 3]`) and `spread_weight.at(i)` are left on `Ix` as well; not measured.
 pub fn spreading_decision(
     X: &[f32],
     average: &mut i32,
@@ -215,40 +207,45 @@ pub fn spreading_decision(
 
     debug_assert!(end > 0);
 
-    let N0 = M * modes::shortMdctSize;
+    let N0 = (M * modes::shortMdctSize) as usize;
+    let bands = &eBands[..end as usize + 1];
+    let spread_weight = &spread_weight[..end as usize];
 
-    if M * (eBands.at(end as usize) as i32 - eBands.at((end - 1) as usize) as i32) <= 8 {
+    if let [.., a, b] = *bands
+        && M * (b as i32 - a as i32) <= 8
+    {
         return SPREAD_NONE;
     }
-    for c in 0..C {
-        for i in 0..end as usize {
+    for c in 0..C as usize {
+        let Xc = &X[c * N0..][..N0];
+        for (i, (b, &w)) in bands.windows(2).zip(spread_weight).enumerate() {
             let mut tcount = [0i32; 3];
-            let x = X.rg((M * eBands.at(i) as i32 + c * N0) as usize..);
-            let N = M * (eBands.at(i + 1) as i32 - eBands.at(i) as i32);
+            let x = &Xc[M as usize * b[0] as usize..M as usize * b[1] as usize];
+            let N = x.len() as i32;
             if N <= 8 {
                 continue;
             }
             /* Compute rough CDF of |x[j]| */
-            for j in 0..N as usize {
-                let x2N: f32 = (x.at(j) * x.at(j)) * N as f32; /* Q13 */
+            for &xj in x {
+                let x2N: f32 = (xj * xj) * N as f32; /* Q13 */
                 if x2N < 0.25f32 {
-                    *tcount.at_mut(0) += 1;
+                    tcount[0] += 1;
                 }
                 if x2N < 0.0625f32 {
-                    *tcount.at_mut(1) += 1;
+                    tcount[1] += 1;
                 }
                 if x2N < 0.015625f32 {
-                    *tcount.at_mut(2) += 1;
+                    tcount[2] += 1;
                 }
             }
 
             /* Only include four last bands (8 kHz and up) */
             if i as i32 > modes::nbEBands - 4 {
-                hf_sum += celt_udiv((32 * (tcount.at(1) + tcount.at(0))) as u32, N as u32) as i32;
+                hf_sum += celt_udiv((32 * (tcount[1] + tcount[0])) as u32, N as u32) as i32;
             }
-            let tmp = (2 * tcount.at(2) >= N) as i32 + (2 * tcount.at(1) >= N) as i32 + (2 * tcount.at(0) >= N) as i32;
-            sum += tmp * spread_weight.at(i);
-            nbBands += spread_weight.at(i);
+            let tmp = (2 * tcount[2] >= N) as i32 + (2 * tcount[1] >= N) as i32 + (2 * tcount[0] >= N) as i32;
+            sum += tmp * w;
+            nbBands += w;
         }
     }
 
@@ -301,35 +298,44 @@ static ordery_table: [i32; 30] = [
     15, 0, 8, 7, 12, 3, 11, 4, 14, 1, 9, 6, 13, 2, 10, 5,
 ];
 
-// IX-HARD: `ordery_table.rg(stride - 2..)` (`stride` from the caller). The strided `X`/`tmp` accesses
-// (`j * stride + i < N`) have the shape of `haar1`, whose `chunks_exact_mut` form cost +1.0% encode time
-// (`haar1` is IX-HARD for that), so they are not converted.
+/// Inverse permutations of the `ordery_table` lines: `ordery_inv[s - 2 + ordery_table[s - 2 + i]] == i`.
+static ordery_inv: [u8; 30] = {
+    let mut inv = [0u8; 30];
+    let mut s = 2;
+    while s <= 16 {
+        let mut i = 0;
+        while i < s {
+            inv[s - 2 + ordery_table[s - 2 + i] as usize] = i as u8;
+            i += 1;
+        }
+        s *= 2;
+    }
+    inv
+};
+
 fn deinterleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
     let tmp = st.alloc::<f32>(N);
     debug_assert!(stride > 0);
     let (N0, stride) = (N0 as usize, stride as usize);
-    if hadamard != 0 {
-        let ordery = ordery_table.rg(stride - 2..);
-        for i in 0..stride {
-            for j in 0..N0 {
-                *tmp.at_mut(ordery.at(i) as usize * N0 + j) = X.at(j * stride + i);
-            }
-        }
-    } else {
-        for i in 0..stride {
-            for j in 0..N0 {
-                *tmp.at_mut(i * N0 + j) = X.at(j * stride + i);
-            }
+    let X = &mut X[..N];
+    let inv: &[u8] = if hadamard != 0 { &ordery_inv[stride - 2..][..stride] } else { &[] };
+    /* row r of tmp is column inv[r] (or r) of X, whose rows have length stride */
+    let rows = X.chunks_exact(stride);
+    for (r, out) in tmp.chunks_exact_mut(N0).enumerate() {
+        let i = if hadamard != 0 { inv[r] as usize } else { r };
+        for (t, x) in out.iter_mut().zip(rows.clone()) {
+            *t = x[i];
         }
     }
-    X.rg_mut(..N).copy_from_slice(tmp);
+    X.copy_from_slice(tmp);
 }
 
-// IX-HARD: `ordery_table.rg(stride - 2..)` (`stride` from the caller). The strided `X`/`tmp` accesses
-// (`j * stride + i < N`) have the shape of `haar1`, whose `chunks_exact_mut` form cost +1.0% encode time
-// (`haar1` is IX-HARD for that), so they are not converted.
+// IX-HARD: the strided `tmp` writes (`j * stride + i`). Tried (as in `deinterleave_hadamard`, looping over
+// the rows of X, `i = ordery_inv[r]`): `tmp.chunks_exact_mut(stride).zip(src)` with `t[i] = x`, check-free in
+// the loop but a division per row: +0.14%/+0.13% encode time (wasm2, min/median), +0.07% (wasm3), +40 B;
+// a `tmp.get_mut(k)`/break form (no division, one compare per sample): +0.21%/+0.17% (wasm2). Not converted.
 fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     let st = stack::save();
     let N = (N0 * stride) as usize;
@@ -352,14 +358,20 @@ fn interleave_hadamard(X: &mut [f32], N0: i32, stride: i32, hadamard: i32) {
     X.rg_mut(..N).copy_from_slice(tmp);
 }
 
-// IX-HARD: `chunks_exact_mut(2 * stride)` + `split_at_mut(stride)` is check-free in the loop but converted:
-// +1.0% encode time (+124 bytes). Many calls have few pairs per column (tf_analysis), so per-call and
-// per-column overhead counts. Tried, all check-free in the loop (bench.ts wasm2, sum over configs):
-// a `match stride` on 1/2/4/8 to const-generic `[[[f32; S]; 2]]` views (`as_chunks_mut`), +0.6%
-// (+560 bytes), and the same `match` around this Ix loop costs +0.6% too, so any stride dispatch is out;
-// `X[i..].iter_mut().step_by(stride)` taken in pairs, +1.0% (two end tests per pair); one loop over
-// `k += 2 * stride` with `k < n - stride` keeps the `X[k + stride]` check; a `Cell` view `a = x[..n -
-// stride]`, `b = x[stride..]` indexed by the same `k < a.len()` is check-free, +0.45% (+106 bytes).
+// IX-HARD: very sensitive to its loop shape (called per band and level from tf_analysis and quant_band, often
+// with few pairs per column, so per-call overhead counts). Check-free forms tried, encode time vs this one
+// (wasm2, min/median, sum over bench.ts configs):
+// - `chunks_exact_mut(2 * stride)` + `split_at_mut(stride)`, pair by pair: +1.0% (+124 B); with copies
+//   for the strides 1/2/4/8: +0.6%/+0.5% (+614 B); `match stride` on 1/2/4/8 to const-generic
+//   `as_chunks_mut::<{2 * stride}>` views (no division): +0.6..0.7% (+560..587 B); the same `match` around
+//   this Ix loop costs +0.6% too, so any stride dispatch is out; single form with `#[inline(always)]`:
+//   +0.7%/+0.8% (+1.3 KiB).
+// - `X[i..].iter_mut().step_by(stride)` taken in pairs: +1.0% (two end tests per pair).
+// - one loop over `k += 2 * stride` with `k < n - stride`: the `X[k + stride]` check stays in the loop.
+// - a `Cell` view `a = x[..n - stride]`, `b = x[stride..]` indexed by the same `k < a.len()`: check-free,
+//   +0.45% (+106 B).
+// - column order kept (`for i in 0..stride`, `chunks_exact_mut(2 * stride)`, `c[i]`/`c[stride + i]`): the
+//   index checks stay in the inner loop, and +0.4%/+0.55% (+145 B).
 pub fn haar1(X: &mut [f32], mut N0: i32, stride: i32) {
     N0 >>= 1;
     let stride = stride as usize;

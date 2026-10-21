@@ -1840,7 +1840,6 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
             (equiv_rate / 1000) as f32,
             &intensity_thresholds,
             &intensity_histeresis,
-            21,
             st.intensity,
         );
         st.intensity = IMIN(end, IMAX(start, st.intensity));
