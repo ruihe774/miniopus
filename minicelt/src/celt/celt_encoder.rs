@@ -20,14 +20,13 @@ use super::modes;
 use super::pitch::{celt_inner_prod, pitch_downsample_factor2, pitch_search, remove_doubling};
 use super::quant_bands::{eMeans, quant_coarse_energy, quant_energy_finalise, quant_fine_energy};
 use super::rate::clt_compute_allocation;
+use super::simd::{madd, trunc_i32};
 use crate::celt::mathops::{fmax, fmin, imax, imin};
 use crate::opus::defines::OPUS_INTERNAL_ERROR;
 use crate::stack;
-use super::simd::{madd, trunc_i32};
 use core::arch::wasm32::{
     f32x4, f32x4_add, f32x4_floor, f32x4_mul, f32x4_pmin, f32x4_splat, i32x4_extract_lane,
-    i64x2_shuffle, u32x4_extract_lane, u32x4_min, u32x4_splat,
-    u32x4_trunc_sat_f32x4,
+    i64x2_shuffle, u32x4_extract_lane, u32x4_min, u32x4_splat, u32x4_trunc_sat_f32x4,
 };
 
 /// LM: log2 of the number of short blocks per frame (20 ms frames only).

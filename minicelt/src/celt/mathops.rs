@@ -2,11 +2,10 @@
 
 use super::simd::{max4, min4, trunc_i32};
 use core::arch::wasm32::{
-    f32x4_add, f32x4_demote_f64x2_zero, f32x4_extract_lane, f32x4_neg,
-    f32x4_splat, f64x2_add, f64x2_convert_low_i32x4, f64x2_div, f64x2_extract_lane, f64x2_floor,
-    f64x2_mul, f64x2_promote_low_f32x4, f64x2_splat, f64x2_sqrt, f64x2_sub, i32x4_shuffle,
-    i64x2_add, i64x2_extend_low_i32x4, i64x2_shl, i64x2_shuffle,
-    i64x2_splat, v128, v128_load,
+    f32x4_add, f32x4_demote_f64x2_zero, f32x4_extract_lane, f32x4_neg, f32x4_splat, f64x2_add,
+    f64x2_convert_low_i32x4, f64x2_div, f64x2_extract_lane, f64x2_floor, f64x2_mul,
+    f64x2_promote_low_f32x4, f64x2_splat, f64x2_sqrt, f64x2_sub, i32x4_shuffle, i64x2_add,
+    i64x2_extend_low_i32x4, i64x2_shl, i64x2_shuffle, i64x2_splat, v128, v128_load,
 };
 
 pub const CELT_SIG_SCALE: f32 = 32768.0;

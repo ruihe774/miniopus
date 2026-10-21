@@ -8,10 +8,10 @@ use core::arch::wasm32::*;
 
 use super::bands::SPREAD_NONE;
 use super::cwrs::encode_pulses;
-use super::simd::{hsum_f32, hsum_i32, laneselect, madd, max4, trunc_i32};
 use super::entcode::{celt_udiv, ec_enc};
 use super::mathops::{EPSILON, atan2p_norm, cos_norm, floor64, rcp, rsqrt, sqrt};
 use super::pitch::celt_inner_prod;
+use super::simd::{hsum_f32, hsum_i32, laneselect, madd, max4, trunc_i32};
 use crate::stack;
 
 fn exp_rotation1(X: &mut [f32], len: i32, stride: i32, c: f32, s: f32) {
