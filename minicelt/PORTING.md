@@ -112,7 +112,8 @@ bit-exact comparison below. What was removed or specialized:
   for a conversion: no bounds check added inside a per-sample loop (a check hoisted out of the loop, or in
   a band-level loop that runs once per frame, is fine), size is a soft constraint, and the encode time
   measured with `minicelt/test/bench.ts` must stay within noise (about 0.2 %). `haar1`,
-  `celt_preemphasis`, `pitch_search` and `icwrs` were converted and reverted on that measure. New code
+  `interleave_hadamard` and the `CELT_PVQ_U` lookup were tried and kept on `Ix` on that measure (their
+  `IX-HARD` comments list the attempts). New code
   should follow the same split, and run the `checked` tests.
 - Memory: the pseudostack is 16 KiB and the shadow stack 8 KiB (the module stays one page up to about
   10 KiB), so the whole module is one 64 KiB wasm page. What keeps the pseudostack small: `norm` of
