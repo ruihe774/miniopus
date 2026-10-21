@@ -221,42 +221,40 @@ fn kf_bfly4(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
     }
 }
 
-// IX-HARD: `Fout.at(fo + k * m)` and `tw.at(..)`: offsets from the runtime `m`, `mm`, `fstride`.
-// (`scratch` is plain.) The split_at_mut/zip/step_by form costs +340 B (see `kf_bfly4`).
 #[inline(always)]
 fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let m2 = 2 * m;
     let mut scratch = [kiss_fft_cpx::default(); 5];
-    let epi3 = tw.at(fstride * m);
+    let epi3 = tw[fstride * m];
     for i in 0..N as usize {
         let mut fo = i * mm as usize;
         let (mut tw1, mut tw2) = (0usize, 0usize);
         /* For non-custom modes, m is guaranteed to be a multiple of 4. */
         let mut k = m;
         loop {
-            scratch[1] = C_MUL(Fout.at(fo + m), tw.at(tw1));
-            scratch[2] = C_MUL(Fout.at(fo + m2), tw.at(tw2));
+            scratch[1] = C_MUL(Fout[fo + m], tw[tw1]);
+            scratch[2] = C_MUL(Fout[fo + m2], tw[tw2]);
 
             scratch[3] = C_ADD(scratch[1], scratch[2]);
             scratch[0] = C_SUB(scratch[1], scratch[2]);
             tw1 += fstride;
             tw2 += fstride * 2;
 
-            Fout.at_mut(fo + m).r = Fout.at(fo).r - HALF_OF(scratch[3].r);
-            Fout.at_mut(fo + m).i = Fout.at(fo).i - HALF_OF(scratch[3].i);
+            Fout[fo + m].r = Fout[fo].r - HALF_OF(scratch[3].r);
+            Fout[fo + m].i = Fout[fo].i - HALF_OF(scratch[3].i);
 
             /* C_MULBYSCALAR( scratch[0] , epi3.i ) */
             scratch[0].r *= epi3.i;
             scratch[0].i *= epi3.i;
 
-            C_ADDTO(Fout.at_mut(fo), scratch[3]);
+            C_ADDTO(&mut Fout[fo], scratch[3]);
 
-            Fout.at_mut(fo + m2).r = Fout.at(fo + m).r + scratch[0].i;
-            Fout.at_mut(fo + m2).i = Fout.at(fo + m).i - scratch[0].r;
+            Fout[fo + m2].r = Fout[fo + m].r + scratch[0].i;
+            Fout[fo + m2].i = Fout[fo + m].i - scratch[0].r;
 
-            Fout.at_mut(fo + m).r = Fout.at(fo + m).r - scratch[0].i;
-            Fout.at_mut(fo + m).i = Fout.at(fo + m).i + scratch[0].r;
+            Fout[fo + m].r = Fout[fo + m].r - scratch[0].i;
+            Fout[fo + m].i = Fout[fo + m].i + scratch[0].r;
 
             fo += 1;
             k -= 1;
