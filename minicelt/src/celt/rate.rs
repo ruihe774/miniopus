@@ -1,6 +1,5 @@
 //! Port of celt/rate.h and celt/rate.c (encoder side; static pulse cache).
 
-use super::arch::Ix;
 use super::arch::{IMAX, IMIN};
 use super::entcode::{ec_ctx, celt_udiv, BITRES};
 use super::entenc::{ec_enc_bit_logp, ec_enc_uint};
@@ -9,8 +8,6 @@ use super::modes;
 static LOG2_FRAC_TABLE: [u8; 24] = [
     0, 8, 13, 16, 19, 21, 23, 24, 26, 27, 28, 29, 30, 31, 32, 32, 33, 34, 34, 35, 36, 36, 37, 37,
 ];
-
-pub const LOG_MAX_PSEUDO: i32 = 6;
 
 pub const MAX_FINE_BITS: i32 = 8;
 
@@ -25,24 +22,24 @@ pub fn get_pulses(i: i32) -> i32 {
 }
 
 /// Fixed interface (used by bands.rs).
-// IX-HARD: `cache_bits.rg(cache_index.at(..)..)` then a binary search over the cache: table-driven indices.
 pub fn bits2pulses(band: i32, LM: i32, mut bits: i32) -> i32 {
     let LM = LM + 1;
-    let cache = modes::cache_bits.rg(modes::cache_index.at((LM * modes::nbEBands + band) as usize) as usize..);
+    /* `cache_bits` is padded so that every entry has a 65-byte window (entries hold at most 40):
+       the indices below are at most 64 by construction, so they need no bounds check. */
+    let ci = modes::cache_index[(LM * modes::nbEBands + band) as usize] as usize;
+    let cache: &[u8; 65] = modes::cache_bits[ci..].first_chunk().unwrap();
+    let n = cache[0] as usize;
 
-    let mut lo = 0usize;
-    let mut hi = cache.at(0) as usize;
     bits -= 1;
-    for _ in 0..LOG_MAX_PSEUDO {
-        let mid = (lo + hi + 1) >> 1;
-        /* OPT: Make sure this is implemented with a conditional move */
-        if cache.at(mid) as i32 >= bits {
-            hi = mid;
-        } else {
-            lo = mid;
-        }
-    }
-    if bits - (if lo == 0 { -1 } else { cache.at(lo) as i32 }) <= cache.at(hi) as i32 - bits {
+    /* The binary search of rate.h (LOG_MAX_PSEUDO = 6 steps over 1..=n) as a branchless search:
+       cache[1..=n] is non-decreasing, so lo is the number of entries below bits. */
+    let step = |lo: usize, half: usize| {
+        let k = lo + half;
+        if (k <= n) & ((cache[k] as i32) < bits) { k } else { lo }
+    };
+    let lo = step(step(step(step(step(step(0, 32), 16), 8), 4), 2), 1);
+    let hi = if lo < n { lo + 1 } else { lo };
+    if bits - (if lo == 0 { -1 } else { cache[lo] as i32 }) <= cache[hi] as i32 - bits {
         lo as i32
     } else {
         hi as i32
@@ -50,22 +47,22 @@ pub fn bits2pulses(band: i32, LM: i32, mut bits: i32) -> i32 {
 }
 
 /// Fixed interface (used by bands.rs).
-// IX-HARD: `cache_bits.rg(cache_index.at(..)..)` then `cache.at(pulses)`: table-driven indices.
+#[inline(always)]
 pub fn pulses2bits(band: i32, LM: i32, pulses: i32) -> i32 {
     let LM = LM + 1;
-    let cache = modes::cache_bits.rg(modes::cache_index.at((LM * modes::nbEBands + band) as usize) as usize..);
-    if pulses == 0 { 0 } else { cache.at(pulses as usize) as i32 + 1 }
+    /* the window of `bits2pulses` (pulses <= 40) */
+    let ci = modes::cache_index[(LM * modes::nbEBands + band) as usize] as usize;
+    let cache: &[u8; 65] = modes::cache_bits[ci..].first_chunk().unwrap();
+    if pulses == 0 { 0 } else { cache[pulses as usize] as i32 + 1 }
 }
 
 const ALLOC_STEPS: i32 = 6;
 
 #[inline(always)]
-// IX-HARD: `eBands.at(i)` with `i` from the callers' band counters (`codedBands`, `j + 1`).
 fn eb(i: i32) -> i32 {
-    modes::eBands.at(i as usize) as i32
+    modes::eBands[i as usize] as i32
 }
 
-// IX-HARD: `LOG2_FRAC_TABLE.at(j - start)`, `modes::logN.at(ju)`, `eb(..)`: indexed by band counters with no length to prove them against.
 fn interp_bits2pulses(
     end: i32, skip_start: i32, bits1: &[i32], bits2: &[i32], thresh: &[i32],
     cap: &[i32], mut total: i32, _balance: &mut i32, skip_rsv: i32, intensity: &mut i32,
@@ -78,6 +75,8 @@ fn interp_bits2pulses(
     let eu = end as usize;
     let (bits1, bits2, thresh, cap) = (&bits1[..eu], &bits2[..eu], &thresh[..eu], &cap[..eu]);
     let (bits, ebits, fine_priority) = (&mut bits[..eu], &mut ebits[..eu], &mut fine_priority[..eu]);
+    /* indexed by the same band counters as `bits` */
+    let (log2_frac, logN) = (&LOG2_FRAC_TABLE[..eu], &modes::logN[..eu]);
     let mut psum: i32;
     let mut lo: i32;
     let mut hi: i32;
@@ -191,7 +190,7 @@ fn interp_bits2pulses(
         /*Reclaim the bits originally allocated to this band.*/
         psum -= bits[ju] + intensity_rsv;
         if intensity_rsv > 0 {
-            intensity_rsv = LOG2_FRAC_TABLE.at((j - start) as usize) as i32;
+            intensity_rsv = log2_frac[(j - start) as usize] as i32;
         }
         psum += intensity_rsv;
         if band_bits >= alloc_floor {
@@ -258,7 +257,7 @@ fn interp_bits2pulses(
             /* Compensate for the extra DoF in stereo */
             let den = C * N + if C == 2 && N > 2 && *dual_stereo == 0 && j < *intensity { 1 } else { 0 };
 
-            let NClogN = den * (modes::logN.at(ju) as i32 + logM);
+            let NClogN = den * (logN[ju] as i32 + logM);
 
             /* Offset for the number of fine bits by log2(N)/2 + FINE_OFFSET
                compared to their "fair share" of total/N */
@@ -338,7 +337,6 @@ fn interp_bits2pulses(
 /// Compute the pulse allocation, i.e. how many pulses will go in each band
 /// (always encoding; `pulses` receives the bits per band).
 /// Returns codedBands.
-// IX-HARD: `allocVectors.at(mid * len + j)` and `LOG2_FRAC_TABLE.at(end - start)`: table-driven indices.
 pub fn clt_compute_allocation(
     end: i32, offsets: &[i32], cap: &[i32], alloc_trim: i32,
     intensity: &mut i32, dual_stereo: &mut i32, mut total: i32, balance: &mut i32, pulses: &mut [i32],
@@ -360,7 +358,7 @@ pub fn clt_compute_allocation(
     let mut intensity_rsv = 0;
     let mut dual_stereo_rsv = 0;
     if C == 2 {
-        intensity_rsv = LOG2_FRAC_TABLE.at((end - start) as usize) as i32;
+        intensity_rsv = LOG2_FRAC_TABLE[(end - start) as usize] as i32;
         if intensity_rsv > total {
             intensity_rsv = 0;
         } else {
@@ -377,6 +375,9 @@ pub fn clt_compute_allocation(
     let eu = end as usize;
     let (offsets, cap) = (&offsets[..eu], &cap[..eu]);
     let (bits1, bits2, thresh, trim_offset) = (&mut bits1[..eu], &mut bits2[..eu], &mut thresh[..eu], &mut trim_offset[..eu]);
+    /* the allocation vectors, one row of nbEBands per quality level, cut to `end` */
+    let alloc_rows = modes::allocVectors.as_chunks::<{ modes::nbEBands as usize }>().0;
+    let alloc = |q: i32| &alloc_rows[q as usize][..eu];
 
     for j in start..end {
         let ju = j as usize;
@@ -397,12 +398,13 @@ pub fn clt_compute_allocation(
         let mut done = false;
         let mut psum = 0;
         let mid = (lo + hi) >> 1;
+        let alloc_mid = alloc(mid);
         let mut j = end;
         while j > start {
             j -= 1;
             let ju = j as usize;
             let N = eb(j + 1) - eb(j);
-            let mut bitsj = C * N * (modes::allocVectors.at((mid * len + j) as usize) as i32) << LM >> 2;
+            let mut bitsj = C * N * (alloc_mid[ju] as i32) << LM >> 2;
             if bitsj > 0 {
                 bitsj = IMAX(0, bitsj + trim_offset[ju]);
             }
@@ -426,14 +428,16 @@ pub fn clt_compute_allocation(
     }
     hi = lo;
     lo -= 1;
+    let alloc_lo = alloc(lo);
+    /* hi == nbAllocVectors: the cap */
+    let alloc_hi = alloc_rows.get(hi as usize).map(|r| &r[..eu]);
     for j in start..end {
         let ju = j as usize;
         let N = eb(j + 1) - eb(j);
-        let mut bits1j = C * N * (modes::allocVectors.at((lo * len + j) as usize) as i32) << LM >> 2;
-        let mut bits2j = if hi >= modes::nbAllocVectors {
-            cap[ju]
-        } else {
-            C * N * (modes::allocVectors.at((hi * len + j) as usize) as i32) << LM >> 2
+        let mut bits1j = C * N * (alloc_lo[ju] as i32) << LM >> 2;
+        let mut bits2j = match alloc_hi {
+            None => cap[ju],
+            Some(alloc_hi) => C * N * (alloc_hi[ju] as i32) << LM >> 2,
         };
         if bits1j > 0 {
             bits1j = IMAX(0, bits1j + trim_offset[ju]);
