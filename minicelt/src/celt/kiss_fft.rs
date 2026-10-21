@@ -5,7 +5,6 @@
 //! scripts/gen_tables.py checks that this reproduces the table of libopus bit for bit) and with
 //! `compute_bitrev_table` of kiss_fft.c. They live in `.bss`.
 
-use super::arch::Ix;
 pub const MAXFACTORS: usize = 8;
 
 pub type kiss_fft_scalar = f32;
@@ -265,14 +264,12 @@ fn kf_bfly3(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
     }
 }
 
-// IX-HARD: `Fout.at(f1..f4 + u)` and `tw.at(k * u * fstride)`: offsets from the runtime `m`, `mm`, `fstride`.
-// (`scratch` is plain.) The split_at_mut/zip/step_by form costs +460 B (see `kf_bfly4`).
 #[inline(always)]
 fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 480], m: i32, N: i32, mm: i32) {
     let m = m as usize;
     let mut scratch = [kiss_fft_cpx::default(); 13];
-    let ya = tw.at(fstride * m);
-    let yb = tw.at(fstride * 2 * m);
+    let ya = tw[fstride * m];
+    let yb = tw[fstride * 2 * m];
 
     for i in 0..N as usize {
         let f0 = i * mm as usize;
@@ -283,20 +280,20 @@ fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
 
         /* For non-custom modes, m is guaranteed to be a multiple of 4. */
         for u in 0..m {
-            scratch[0] = Fout.at(f0 + u);
+            scratch[0] = Fout[f0 + u];
 
-            scratch[1] = C_MUL(Fout.at(f1 + u), tw.at(u * fstride));
-            scratch[2] = C_MUL(Fout.at(f2 + u), tw.at(2 * u * fstride));
-            scratch[3] = C_MUL(Fout.at(f3 + u), tw.at(3 * u * fstride));
-            scratch[4] = C_MUL(Fout.at(f4 + u), tw.at(4 * u * fstride));
+            scratch[1] = C_MUL(Fout[f1 + u], tw[u * fstride]);
+            scratch[2] = C_MUL(Fout[f2 + u], tw[2 * u * fstride]);
+            scratch[3] = C_MUL(Fout[f3 + u], tw[3 * u * fstride]);
+            scratch[4] = C_MUL(Fout[f4 + u], tw[4 * u * fstride]);
 
             scratch[7] = C_ADD(scratch[1], scratch[4]);
             scratch[10] = C_SUB(scratch[1], scratch[4]);
             scratch[8] = C_ADD(scratch[2], scratch[3]);
             scratch[9] = C_SUB(scratch[2], scratch[3]);
 
-            Fout.at_mut(f0 + u).r = Fout.at(f0 + u).r + (scratch[7].r + scratch[8].r);
-            Fout.at_mut(f0 + u).i = Fout.at(f0 + u).i + (scratch[7].i + scratch[8].i);
+            Fout[f0 + u].r = Fout[f0 + u].r + (scratch[7].r + scratch[8].r);
+            Fout[f0 + u].i = Fout[f0 + u].i + (scratch[7].i + scratch[8].i);
 
             scratch[5].r = scratch[0].r + (scratch[7].r * ya.r + scratch[8].r * yb.r);
             scratch[5].i = scratch[0].i + (scratch[7].i * ya.r + scratch[8].i * yb.r);
@@ -304,16 +301,16 @@ fn kf_bfly5(Fout: &mut [kiss_fft_cpx], fstride: usize, tw: &[kiss_twiddle_cpx; 4
             scratch[6].r = scratch[10].i * ya.i + scratch[9].i * yb.i;
             scratch[6].i = -(scratch[10].r * ya.i + scratch[9].r * yb.i);
 
-            *Fout.at_mut(f1 + u) = C_SUB(scratch[5], scratch[6]);
-            *Fout.at_mut(f4 + u) = C_ADD(scratch[5], scratch[6]);
+            Fout[f1 + u] = C_SUB(scratch[5], scratch[6]);
+            Fout[f4 + u] = C_ADD(scratch[5], scratch[6]);
 
             scratch[11].r = scratch[0].r + (scratch[7].r * yb.r + scratch[8].r * ya.r);
             scratch[11].i = scratch[0].i + (scratch[7].i * yb.r + scratch[8].i * ya.r);
             scratch[12].r = scratch[9].i * ya.i - scratch[10].i * yb.i;
             scratch[12].i = scratch[10].r * yb.i - scratch[9].r * ya.i;
 
-            *Fout.at_mut(f2 + u) = C_ADD(scratch[11], scratch[12]);
-            *Fout.at_mut(f3 + u) = C_SUB(scratch[11], scratch[12]);
+            Fout[f2 + u] = C_ADD(scratch[11], scratch[12]);
+            Fout[f3 + u] = C_SUB(scratch[11], scratch[12]);
         }
     }
 }
