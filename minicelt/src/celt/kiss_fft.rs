@@ -5,6 +5,8 @@
 //! scripts/gen_tables.py checks that this reproduces the table of libopus bit for bit) and with
 //! `compute_bitrev_table` of kiss_fft.c. They live in `.bss`.
 
+use crate::global::Global;
+
 pub const MAXFACTORS: usize = 8;
 
 pub type kiss_fft_scalar = f32;
@@ -38,21 +40,17 @@ struct FftTables {
     bitrev480: [i16; 480],
     bitrev60: [i16; 60],
 }
-struct Tables(core::cell::UnsafeCell<FftTables>);
-// SAFETY: written only by `init_fft`, single-threaded use only (as the pseudostack).
-// UNSAFE-MAND: `UnsafeCell` statics need a manual `Sync` impl.
-unsafe impl Sync for Tables {}
-static TABLES: Tables = Tables(core::cell::UnsafeCell::new(FftTables {
+/// Written only by `init_fft`.
+static TABLES: Global<FftTables> = Global::new(FftTables {
     twiddles: [kiss_twiddle_cpx { r: 0.0, i: 0.0 }; 480],
     bitrev480: [0; 480],
     bitrev60: [0; 60],
-}));
+});
 
 #[inline(always)]
 fn tables() -> &'static FftTables {
-    // SAFETY: init_fft ran before the first encode; the tables are only read afterwards.
-    // UNSAFE-MAND: reading through the `UnsafeCell` static (the tables are filled at runtime).
-    unsafe { &*TABLES.0.get() }
+    // init_fft ran before the first encode; the tables are only read afterwards.
+    TABLES.get_ref()
 }
 
 #[inline(always)]
@@ -93,9 +91,8 @@ pub fn init_fft() {
     use super::static_modes_float::{
         fft_state48000_960_0, fft_state48000_960_3, fft_twiddles48000_960 as octant,
     };
-    // SAFETY: nothing reads the tables while they are rebuilt (init only).
-    // UNSAFE-MAND: `&mut` to the `UnsafeCell` static.
-    let t = unsafe { &mut *TABLES.0.get() };
+    // nothing reads the tables while they are rebuilt (init only).
+    let t = TABLES.get_mut();
     let tw = &mut t.twiddles;
     let cpx = |r: f32, i: f32| kiss_twiddle_cpx { r, i };
     tw[..61].copy_from_slice(&octant);

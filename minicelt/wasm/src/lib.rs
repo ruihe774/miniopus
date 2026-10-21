@@ -15,8 +15,7 @@
 //!    `minicelt_final_range()` `OPUS_GET_FINAL_RANGE` and `minicelt_in_dtx()` `OPUS_GET_IN_DTX`.
 #![no_std]
 
-use core::ptr::addr_of_mut;
-use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use minicelt::global::Global;
 use minicelt::opus::encoder::OpusEncoder;
 
 const FRAME: usize = 960;
@@ -25,42 +24,39 @@ const OUT_CAP: usize = minicelt::opus::encoder::PACKET_SIZE_CAP;
 /// 960 samples plus the 120 of overlap per channel
 const IN_BUF_FRAME: usize = minicelt::opus::encoder::IN_BUF_FRAME as usize;
 
-static mut ENCODER: OpusEncoder = OpusEncoder::new_zeroed();
-static CHANNELS: AtomicUsize = AtomicUsize::new(0);
+static ENCODER: Global<OpusEncoder> = Global::new(OpusEncoder::new_zeroed());
+static CHANNELS: Global<usize> = Global::new(0);
 /// The input buffer (the first `960 * channels` samples); also the encoder's working memory
 /// (room for `120` more samples per channel), and the i16 input is converted in place.
-static mut INPUT: [f32; IN_BUF_FRAME * MAX_CHANNELS] = [0.0; IN_BUF_FRAME * MAX_CHANNELS];
-static mut OUTPUT: [u8; OUT_CAP] = [0; OUT_CAP];
+static INPUT: Global<[f32; IN_BUF_FRAME * MAX_CHANNELS]> = Global::new([0.0; IN_BUF_FRAME * MAX_CHANNELS]);
+static OUTPUT: Global<[u8; OUT_CAP]> = Global::new([0; OUT_CAP]);
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
 
-// SAFETY (all accessors): wasm32-unknown-unknown here is single-threaded and the exports are
-// not re-entrant, so these statics are never aliased.
+// wasm32-unknown-unknown here is single-threaded and the exports are not re-entrant, so these
+// statics are never aliased (see `Global`).
 fn enc() -> &'static mut OpusEncoder {
-    // UNSAFE-MAND: `&mut` to a `static mut`.
-    unsafe { &mut *addr_of_mut!(ENCODER) }
+    ENCODER.get_mut()
 }
 
 fn input() -> &'static mut [f32; IN_BUF_FRAME * MAX_CHANNELS] {
-    // UNSAFE-MAND: `&mut` to a `static mut`.
-    unsafe { &mut *addr_of_mut!(INPUT) }
+    INPUT.get_mut()
 }
 
 fn output() -> &'static mut [u8; OUT_CAP] {
-    // UNSAFE-MAND: `&mut` to a `static mut`.
-    unsafe { &mut *addr_of_mut!(OUTPUT) }
+    OUTPUT.get_mut()
 }
 
 fn channels() -> usize {
-    CHANNELS.load(Relaxed)
+    CHANNELS.get()
 }
 
 #[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_init(channels: i32, bitrate: i32, complexity: i32, vbr_constraint: i32, dtx: i32) -> i32 {
-    CHANNELS.store(0, Relaxed);
+    CHANNELS.set(0);
     let e = enc();
     let mut r = e.init(channels);
     if r >= 0 {
@@ -77,7 +73,7 @@ pub extern "C" fn minicelt_init(channels: i32, bitrate: i32, complexity: i32, vb
     }
     // Leave the encoder unusable unless every setting was accepted.
     if r >= 0 {
-        CHANNELS.store(channels as usize, Relaxed);
+        CHANNELS.set(channels as usize);
     }
     r
 }
@@ -114,17 +110,17 @@ pub extern "C" fn minicelt_set_bandwidth(v: i32) -> i32 {
 
 #[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_input_ptr() -> *mut f32 {
-    addr_of_mut!(INPUT) as *mut f32
+    INPUT.as_ptr() as *mut f32
 }
 
 #[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_input_i16_ptr() -> *mut i16 {
-    addr_of_mut!(INPUT) as *mut i16
+    INPUT.as_ptr() as *mut i16
 }
 
 #[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
 pub extern "C" fn minicelt_output_ptr() -> *const u8 {
-    addr_of_mut!(OUTPUT) as *const u8
+    OUTPUT.as_ptr() as *const u8
 }
 
 /// Encodes `960 * channels` interleaved samples from `minicelt_input_ptr()`.

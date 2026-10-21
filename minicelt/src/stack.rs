@@ -12,10 +12,9 @@
 //! memory is not cleared; `Pod` restricts allocations to types for which every bit pattern
 //! is valid. Not thread-safe: the encoder must only run on one thread at a time.
 
-use core::cell::UnsafeCell;
+use crate::global::Global;
 use core::marker::PhantomData;
 use core::mem::{align_of, size_of};
-use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 /// Scratch size in bytes: the measured worst-case peak, 16376 bytes, rounded up to the 16-byte
 /// alignment of the buffer.
@@ -35,21 +34,17 @@ pub const GLOBAL_STACK_SIZE: usize = 16384;
 
 #[repr(C, align(16))]
 struct Scratch {
-    buf: UnsafeCell<[u8; GLOBAL_STACK_SIZE]>,
-    top: AtomicUsize,
+    buf: Global<[u8; GLOBAL_STACK_SIZE]>,
+    top: Global<usize>,
     #[cfg(feature = "stack-peak")]
-    peak: AtomicUsize,
+    peak: Global<usize>,
 }
 
-// SAFETY: single-threaded use only, as with NONTHREADSAFE_PSEUDOSTACK in C.
-// UNSAFE-MAND: `UnsafeCell` statics need a manual `Sync` impl.
-unsafe impl Sync for Scratch {}
-
 static SCRATCH: Scratch = Scratch {
-    buf: UnsafeCell::new([0; GLOBAL_STACK_SIZE]),
-    top: AtomicUsize::new(0),
+    buf: Global::new([0; GLOBAL_STACK_SIZE]),
+    top: Global::new(0),
     #[cfg(feature = "stack-peak")]
-    peak: AtomicUsize::new(0),
+    peak: Global::new(0),
 };
 
 /// Types for which every bit pattern is a valid value.
@@ -89,7 +84,7 @@ pub struct StackGuard {
 #[inline(always)]
 pub fn save() -> StackGuard {
     StackGuard {
-        saved: SCRATCH.top.load(Relaxed),
+        saved: SCRATCH.top.get(),
         _not_send: PhantomData,
     }
 }
@@ -99,15 +94,15 @@ impl StackGuard {
     #[inline(always)]
     #[allow(clippy::mut_from_ref)]
     pub fn alloc<T: Pod>(&self, n: usize) -> &mut [T] {
-        let base = SCRATCH.buf.get() as *mut u8;
-        let start = (SCRATCH.top.load(Relaxed) + align_of::<T>() - 1) & !(align_of::<T>() - 1);
+        let base = SCRATCH.buf.as_ptr() as *mut u8;
+        let start = (SCRATCH.top.get() + align_of::<T>() - 1) & !(align_of::<T>() - 1);
         let end = start + n * size_of::<T>();
         if end > GLOBAL_STACK_SIZE {
             panic!("pseudostack overflow");
         }
-        SCRATCH.top.store(end, Relaxed);
+        SCRATCH.top.set(end);
         #[cfg(feature = "stack-peak")]
-        SCRATCH.peak.fetch_max(end, Relaxed);
+        SCRATCH.peak.set(SCRATCH.peak.get().max(end));
         // UNSAFE-MAND: hands out `&mut` from `&self` into the static buffer; `start..end` is in bounds,
         // aligned for `T`, and disjoint from live allocations (the bump pointer only moves up while a guard lives).
         unsafe { core::slice::from_raw_parts_mut(base.add(start) as *mut T, n) }
@@ -117,12 +112,12 @@ impl StackGuard {
 impl Drop for StackGuard {
     #[inline(always)]
     fn drop(&mut self) {
-        SCRATCH.top.store(self.saved, Relaxed);
+        SCRATCH.top.set(self.saved);
     }
 }
 
 /// High-water mark of the scratch buffer in bytes (`stack-peak` feature only).
 #[cfg(feature = "stack-peak")]
 pub fn peak() -> usize {
-    SCRATCH.peak.load(Relaxed)
+    SCRATCH.peak.get()
 }
