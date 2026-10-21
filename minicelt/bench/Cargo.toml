@@ -1,0 +1,24 @@
+[package]
+name = "minicelt-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Native A/B encode-time benchmark of minicelt wasm builds, compiled ahead of time"
+
+# Not a workspace member: it is a native host tool with heavy dependencies (Wasmtime, Wasmer, LLVM) and its
+# own Cargo.lock, kept out of the wasm32 workspace and its release profile.
+[workspace]
+
+[features]
+default = ["wasmtime", "wasmer-cranelift"]
+wasmtime = ["dep:wasmtime"]
+wasmer-cranelift = ["dep:wasmer", "wasmer/cranelift"]
+# Needs LLVM 22 (llvm-22-dev, libpolly-22-dev; LLVM_SYS_221_PREFIX if llvm-config is not in PATH).
+wasmer-llvm = ["dep:wasmer", "wasmer/llvm"]
+
+[dependencies]
+wasmtime = { version = "50", optional = true, default-features = false, features = ["cranelift", "runtime", "parallel-compilation"] }
+wasmer = { version = "7.5", optional = true, default-features = false, features = ["sys"] }
+
+[profile.release]
+debug = "line-tables-only"

@@ -103,7 +103,7 @@ packet-identity regression check below. What was removed or specialized:
   All four are bit for bit equal to `libm`'s, checked exhaustively over the inputs they can see.
 - `mathops::maxabs` is vectorized (`f32x4_pmax`/`f32x4_pmin`, which are the C ternaries `fmax`/`fmin` with the
   operands swapped; min and max do not depend on the order): packets identical to the scalar loop, 2-5 % less
-  encode time in `bench.ts` (it scans every frame three times). `minicelt/test/bench_maxabs.ts` microbenchmarks it.
+  encode time in the former V8 `bench.ts` (it scans every frame three times). `minicelt/test/bench_maxabs.ts` microbenchmarks it.
 - C `amp2Log2` always follows `compute_band_energies` and is folded into it (one loop computes `bandE` and
   `bandLogE`): -205 B, same speed. Taking `sqrt` and `log2` two bands at a time (`f32x4_sqrt`, `log2` on `f64x2`)
   gives the same packets but no measurable speedup (21-42 `log2` calls per frame) for +650 B, so it is not done.
@@ -122,7 +122,7 @@ packet-identity regression check below. What was removed or specialized:
   giving the reason and, where a conversion was tried, its measured cost (bytes, encode time). The rule
   for a conversion: no bounds check added inside a per-sample loop (a check hoisted out of the loop, or in
   a band-level loop that runs once per frame, is fine), size is a soft constraint, and the encode time
-  measured with `minicelt/test/bench.ts` must stay within noise (about 0.2 %). `haar1`,
+  measured with `scripts/bench.sh` must stay within noise. `haar1`,
   `interleave_hadamard` and the `CELT_PVQ_U` lookup were tried and kept unchecked on that measure (their
   `IX-HARD` comments list the attempts). New code
   should follow the same split, and run the `checked` tests.
@@ -149,9 +149,14 @@ does not see small changes). Mono/stereo, complexity 0..10, bitrates from 500 to
 on/off, packet loss, bandwidths, DTX, i16/f32, dynamic ctl changes and the speech corpus were used,
 both variants.
 
-Speed regressions: `minicelt/test/bench.ts` (Deno; usage in its header) encodes the concatenated
-speech corpus with two builds, interleaved, and prints min/median time and output size per
-configuration. Differences below about 0.2 % are noise. Run it for any change that touches a hot loop
+Speed regressions: `scripts/bench.sh` builds and runs `minicelt/bench`, a native harness (usage in
+`minicelt/bench/src/main.rs`) that compiles the builds ahead of time with Wasmtime (Cranelift) and, on
+request, Wasmer (Cranelift, or LLVM with `-e wasmer-llvm`, which needs LLVM 22; Wasmer's Cranelift has no
+tail calls and skips the WASM 3.0 variant). With no tiering JIT, the code that runs is the same on every
+run (the V8-based `bench.ts` it replaces depended on V8's tier-up decisions). It encodes the concatenated
+speech corpus with several builds, interleaved, and prints min/median time and output size per
+configuration. The remaining noise is the machine's: measure it with an A/A run (one build against a copy
+of itself) and run nothing else meanwhile. Run it for any change that touches a hot loop
 (it covers mono at 24 and 64 kbps and stereo at 6 to 128 kbps, complexity 5 and 10, i.e. every function
 changed in the bounds-check conversion; `stereo_fade` only runs for stereo at 24 kbps and below. It does not
 cover packet loss, bandwidth limits, DTX or constrained VBR, nor low complexity).

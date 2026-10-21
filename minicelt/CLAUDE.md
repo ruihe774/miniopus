@@ -21,7 +21,8 @@ Rust port of the libopus CELT-only float encoder for wasm32. Read `PORTING.md` b
 - `test/compare.ts` (Deno) + `test/shim.c` + `test/analysis_stub.c`: differential test against native
   `third_party/opus` (scalar C as the oracle, by tolerance). `scripts/gen_tables.py` generates
   `src/celt/static_modes_float.rs` (trimmed to the scope).
-- `test/bench.ts` (Deno): A/B encode-time benchmark of two builds (PORTING.md "Trimming").
+- `bench/` (native, own workspace; run with `scripts/bench.sh`): A/B encode-time benchmark of builds,
+  compiled ahead of time by Wasmtime / Wasmer (Cranelift, LLVM) (PORTING.md "Trimming").
   `test/bench_maxabs.ts`: A/B microbenchmark of `mathops::maxabs` (builds with `--features bench-maxabs`).
 - `test/coverage.ts` + `scripts/coverage.sh`: function / branch-arm coverage printed to the log (CI job `coverage`).
 
@@ -41,5 +42,5 @@ Rust port of the libopus CELT-only float encoder for wasm32. Read `PORTING.md` b
   `v1.6.1-wasm-simd`) and use `core::arch::wasm32`, with no scalar fallback.
   Relaxed SIMD uses `cfg(target_feature = "relaxed-simd")`.
 - Bounds checks: plain indexing where provable, inline `get_unchecked` behind a `debug_assert!` only for the `IX-HARD` sites (PORTING.md
-  "Bounds checks"); no check added in a per-sample loop, and bench encode time (`test/bench.ts`).
+  "Bounds checks"); no check added in a per-sample loop, and bench encode time (`scripts/bench.sh`).
 - `src/` is BSD-3 (libopus derivative).

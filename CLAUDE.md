@@ -31,5 +31,7 @@ and `minicelt/` (CELT-only). Each crate has its own `CLAUDE.md` (scope) and `POR
   -> `target/mini{silk,celt}-wasm{2,3}[-checked].wasm`
 - `scripts/build-native.sh` builds the native libopus references (`target/native/`).
 - `scripts/test.sh [silk|celt|all] [--quick]` builds everything and runs the comparisons.
+- `scripts/bench.sh [-e ENGINE]... <audio dir> label=path.wasm...`: minicelt encode-time A/B benchmark,
+  AOT-compiled by Wasmtime / Wasmer (`minicelt/bench`, a native crate outside the wasm workspace).
 - `scripts/variance.ts` (Deno; after `build-native.sh`) measures how much upstream libopus' scalar and SIMD
   encoders differ (SILK, CELT); `scripts/select-clips.ts` cuts test clips from long recordings for it.

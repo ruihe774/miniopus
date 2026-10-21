@@ -7,7 +7,7 @@
 //     --strip-dwarf --strip-producers --strip-target-features -o /path/new.wasm
 //   deno run -A minicelt/test/bench_maxabs.ts test/audio old=/path/old.wasm new=/path/new.wasm
 // The input buffer holds 1920 samples of the speech corpus (16 kHz mono, x3 upsampled by repetition, from the
-// loudest 40 ms; the right channel a delayed, inverted copy, as in bench.ts), scaled to +-1. The cases are the
+// loudest 40 ms; the right channel a delayed, inverted copy, as in minicelt/bench), scaled to +-1. The cases are the
 // slices the encoder passes: the whole frame (opus layer) and the frame minus the overlap plus the overlap (CELT),
 // mono and stereo. Each case runs about SAMPLES (default 2e7) samples per timed call, REPS (default 15) interleaved
 // runs after one warm-up, and prints min / median ns per call, the change against the first build, and checks that
