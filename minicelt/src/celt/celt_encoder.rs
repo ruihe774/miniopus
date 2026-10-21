@@ -1875,6 +1875,7 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     let tf_select: i32;
     /* Disable variable tf resolution for hybrid and at very low bitrate */
     if enable_tf_analysis {
+        // div_s: effectiveBytes >= 15 * C here (enable_tf_analysis)
         let lambda: i32 = imax(80, 20480 / effectiveBytes + 2);
         tf_select = tf_analysis(
             end,

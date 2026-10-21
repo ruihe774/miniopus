@@ -153,10 +153,12 @@ pub fn silk_A2NLSF(NLSF: &mut [i16], a_Q16: &mut [i32], d: i32) {
                 let den = ylo - yhi;
                 let nom = silk_LSHIFT(ylo, 8 - BIN_DIV_STEPS_A2NLSF_FIX) + silk_RSHIFT(den, 1);
                 if den != 0 {
+                    // div_s: guarded by den != 0
                     ffrac += silk_DIV32(nom, den);
                 }
             } else {
                 /* No risk of dividing by zero because abs(ylo - yhi) >= abs(ylo) >= 65536 */
+                // div_s: divisor magnitude >= 65536 >> (8 - BIN_DIV_STEPS_A2NLSF_FIX) > 0
                 ffrac += silk_DIV32(ylo, silk_RSHIFT(ylo - yhi, 8 - BIN_DIV_STEPS_A2NLSF_FIX));
             }
             *NLSF.at_mut(root_ix as usize) = silk_min_32(silk_LSHIFT(k, 8) + ffrac, silk_int16_MAX) as i16;
@@ -185,6 +187,7 @@ pub fn silk_A2NLSF(NLSF: &mut [i16], a_Q16: &mut [i32], d: i32) {
                 i += 1;
                 if i > MAX_ITERATIONS_A2NLSF_FIX {
                     /* Set NLSFs to white spectrum and exit */
+                    // div_s: d >= 0, so d + 1 >= 1
                     NLSF[0] = silk_DIV32_16(1 << 15, d + 1) as i16;
                     for k in 1..d as usize {
                         *NLSF.at_mut(k) = NLSF.at(k - 1).wrapping_add(NLSF.at(0));

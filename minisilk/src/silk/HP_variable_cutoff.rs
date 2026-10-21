@@ -14,6 +14,7 @@ pub fn silk_HP_variable_cutoff(
     /* Adaptive cutoff frequency: estimate low end of pitch frequency range */
     if psEncC1.prevSignalType as i32 == TYPE_VOICED {
         /* difference, in log domain */
+        // div_s: prevLag > 0 for a voiced frame
         let pitch_freq_Hz_Q16 = silk_DIV32_16(silk_LSHIFT(FS_KHZ * 1000, 16), psEncC1.prevLag);
         let mut pitch_freq_log_Q7 = silk_lin2log(pitch_freq_Hz_Q16) - (16 << 7);
 

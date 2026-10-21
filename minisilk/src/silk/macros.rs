@@ -455,6 +455,7 @@ pub fn silk_DIV32_varQ(a32: i32, b32: i32, Qres: i32) -> i32 {
     let b32_nrm = silk_LSHIFT(b32, b_headrm); /* Q: b_headrm                  */
 
     /* Inverse of b32, with 14 bits of precision */
+    // div_s: b32_nrm is normalised, so |b32_nrm >> 16| >= 2^14; numerator is a positive constant
     let b32_inv = silk_DIV32_16(silk_int32_MAX >> 2, silk_RSHIFT(b32_nrm, 16)); /* Q: 29 + 16 - b_headrm        */
 
     /* First approximation */
@@ -491,6 +492,7 @@ pub fn silk_INVERSE32_varQ(b32: i32, Qres: i32) -> i32 {
     let b32_nrm = silk_LSHIFT(b32, b_headrm); /* Q: b_headrm                */
 
     /* Inverse of b32, with 14 bits of precision */
+    // div_s: b32_nrm is normalised, so |b32_nrm >> 16| >= 2^14; numerator is a positive constant
     let b32_inv = silk_DIV32_16(silk_int32_MAX >> 2, silk_RSHIFT(b32_nrm, 16)); /* Q: 29 + 16 - b_headrm    */
 
     /* First approximation */

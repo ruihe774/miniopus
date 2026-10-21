@@ -451,6 +451,7 @@ fn compute_qn(N: i32, b: i32, offset: i32, pulse_cap: i32, stereo: i32) -> i32 {
     /* The upper limit ensures that in a stereo split with itheta==16384, we'll
     always have enough bits left over to code at least one pulse in the
     side; otherwise it would collapse, since it doesn't get folded. */
+    // div_s: N2 >= 1
     qb = celt_sudiv(b + N2 * offset, N2);
     qb = imin(b - pulse_cap - (4 << BITRES), qb);
 
@@ -555,6 +556,7 @@ fn compute_theta(
             }
         } else {
             /* Bias quantization towards itheta=0 and itheta=16384. */
+            // div_s: qn >= 1
             let bias = if itheta > 8192 {
                 32767 / qn
             } else {
@@ -1383,6 +1385,7 @@ pub fn quant_all_bands(
         let remaining_bits = total_bits - tell - 1;
         ctx.remaining_bits = remaining_bits;
         let b = if i <= codedBands - 1 {
+            // div_s: i <= codedBands - 1, so the divisor is >= 1
             let curr_balance = celt_sudiv(balance, imin(3, codedBands - i));
             imax(
                 0i32,

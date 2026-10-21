@@ -26,12 +26,14 @@ pub fn silk_VAD_Init(
     /* init noise levels */
     /* Initialize array with approx pink noise levels (psd proportional to inverse of frequency) */
     for b in 0..VAD_N_BANDS_ {
+        // div_s: b + 1 >= 1
         psSilk_VAD.NoiseLevelBias[b] = silk_max_32(silk_DIV32_16(VAD_NOISE_LEVELS_BIAS, b as i32 + 1), 1);
     }
 
     /* Initialize state */
     for b in 0..VAD_N_BANDS_ {
         psSilk_VAD.NL[b] = silk_MUL(100, psSilk_VAD.NoiseLevelBias[b]);
+        // div_s: NL[b] > 0 (initialised positive, updated with saturating adds)
         psSilk_VAD.inv_NL[b] = silk_DIV32(silk_int32_MAX, psSilk_VAD.NL[b]);
     }
     psSilk_VAD.counter = 15;
@@ -224,8 +226,10 @@ pub unsafe fn silk_VAD_GetSA_Q8(
             if speech_nrg > 0 {
                 /* Divide, with sufficient resolution */
                 if (Xnrg[b] as u32 & 0xFF800000) == 0 {
+                    // div_s: NL + 1 >= 1 since NL >= 0
                     NrgToNoiseRatio_Q8[b] = silk_DIV32(silk_LSHIFT(Xnrg[b], 8), psSilk_VAD.NL[b] + 1);
                 } else {
+                    // div_s: (NL >> 8) + 1 >= 1 since NL >= 0
                     NrgToNoiseRatio_Q8[b] = silk_DIV32(Xnrg[b], silk_RSHIFT(psSilk_VAD.NL[b], 8) + 1);
                 }
 
@@ -323,6 +327,7 @@ pub fn silk_VAD_GetNoiseLevels(
     /* Initially faster smoothing */
     if psSilk_VAD.counter < 1000 {
         /* 1000 = 20 sec */
+        // div_s: (counter >> 4) + 1 >= 1
         min_coef = silk_DIV32_16(silk_int16_MAX, silk_RSHIFT(psSilk_VAD.counter, 4) + 1);
         /* Increment frame counter */
         psSilk_VAD.counter += 1;
@@ -340,6 +345,7 @@ pub fn silk_VAD_GetNoiseLevels(
         debug_assert!(nrg > 0);
 
         /* Invert energies */
+        // div_s: nrg > 0 (saturating add of positive terms)
         inv_nrg = silk_DIV32(silk_int32_MAX, nrg);
         debug_assert!(inv_nrg >= 0);
 
@@ -360,6 +366,7 @@ pub fn silk_VAD_GetNoiseLevels(
         debug_assert!(psSilk_VAD.inv_NL[k] >= 0);
 
         /* Compute noise level by inverting again */
+        // div_s: inv_NL[k] > 0
         nl = silk_DIV32(silk_int32_MAX, psSilk_VAD.inv_NL[k]);
         debug_assert!(nl >= 0);
 

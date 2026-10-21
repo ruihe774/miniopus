@@ -26,6 +26,7 @@ pub fn silk_LPC_fit(a_QOUT: &mut [i16], a_QIN: &mut [i32], QOUT: i32, QIN: i32, 
         if maxabs > silk_int16_MAX {
             /* Reduce magnitude of prediction coefficients */
             maxabs = silk_min!(maxabs, 163838); /* ( silk_int32_MAX >> 14 ) + silk_int16_MAX = 163838 */
+            // div_s: div_s divisor (maxabs * (idx + 1)) >> 2 >= 8191: maxabs > 32767, idx >= 0
             let chirp_Q16 = SILK_FIX_CONST(0.999, 16)
                 - silk_DIV32(
                     silk_LSHIFT(maxabs - silk_int16_MAX, 14),

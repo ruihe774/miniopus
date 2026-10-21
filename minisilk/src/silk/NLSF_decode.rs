@@ -58,6 +58,7 @@ pub fn silk_NLSF_decode(pNLSF_Q15: &mut [i16], NLSFIndices: &[i8], psNLSF_CB: &s
         let pCB_Wght_Q9 = psNLSF_CB.CB1_Wght_Q9.add((NLSFIndices[0] as i32 * order) as usize);
         for i in 0..order as usize {
             let NLSF_Q15_tmp = silk_ADD_LSHIFT32(
+                // div_s: divisor is a codebook weight, positive in the tables
                 silk_DIV32_16(silk_LSHIFT(res_Q10[i] as i32, 14), *pCB_Wght_Q9.add(i) as i32),
                 *pCB_element.add(i) as i32,
                 7,
