@@ -14,9 +14,10 @@ use core::ptr;
 
 use super::entcode::{BITRES, EC_ILOG, celt_sudiv, celt_udiv, ec_ctx, ec_tell_frac};
 use super::entenc::{ec_enc_bit_logp, ec_enc_bits, ec_enc_uint, ec_encode};
-use super::mathops::{EPSILON, Q31ONE, rsqrt, sqrt, sqrt64};
+use super::mathops::{EPSILON, Q31ONE, log2, rsqrt, sqrt, sqrt64};
 use super::modes;
 use super::pitch::celt_inner_prod;
+use super::quant_bands::eMeans;
 use super::rate::{QTHETA_OFFSET, QTHETA_OFFSET_TWOPHASE, bits2pulses, get_pulses, pulses2bits};
 use super::vq::{alg_quant, renormalise_vector, stereo_itheta};
 use crate::stack;
@@ -91,24 +92,36 @@ pub fn bitexact_log2tan(mut isin: i32, mut icos: i32) -> i32 {
         - FRAC_MUL16(icos, FRAC_MUL16(icos, -2597) + 7932)
 }
 
-/// Compute the amplitude (sqrt energy) in each of the bands
-pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], end: i32, C: i32) {
+/// Compute the amplitude (sqrt energy) in each of the bands, and its log2 relative to `eMeans`
+/// (C amp2Log2, which always follows; `effEnd == end`, so no `-14` fill).
+pub fn compute_band_energies(X: &[f32], bandE: &mut [f32], bandLogE: &mut [f32], end: i32, C: i32) {
     /* LM == 3 */
     let LM = 3;
     let eBands = modes::eBands;
     let N = (modes::shortMdctSize << LM) as usize;
+    const NB: usize = modes::nbEBands as usize;
     debug_assert!(
-        X.len() >= C as usize * N && bandE.len() >= C as usize * modes::nbEBands as usize
+        X.len() >= C as usize * N
+            && bandE.len() >= C as usize * NB
+            && bandLogE.len() >= C as usize * NB
     );
-    for (Xc, bandEc) in X
+    for ((Xc, bandEc), bandLogEc) in X
         .chunks_exact(N)
-        .zip(bandE.chunks_exact_mut(modes::nbEBands as usize))
+        .zip(bandE.chunks_exact_mut(NB))
+        .zip(bandLogE.chunks_exact_mut(NB))
         .take(C as usize)
     {
-        for (e, b) in bandEc.iter_mut().zip(eBands.windows(2)).take(end as usize) {
+        for (((e, l), b), &mean) in bandEc
+            .iter_mut()
+            .zip(bandLogEc)
+            .zip(eBands.windows(2))
+            .zip(&eMeans)
+            .take(end as usize)
+        {
             let band = &Xc[(b[0] as usize) << LM..(b[1] as usize) << LM];
             let sum: f32 = 1e-27f32 + celt_inner_prod(band, band, band.len() as i32);
             *e = sqrt(sum);
+            *l = log2(*e) - mean;
         }
     }
 }

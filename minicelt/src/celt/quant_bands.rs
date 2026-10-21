@@ -6,12 +6,12 @@
 //! Dropped: the decoder functions (`unquant_*`), `log2Amp` (decoder/RESYNTH only), and the
 //! `lfe` parameter (no LFE). `quant_fine_energy` loses `prev_quant` (always NULL outside
 //! ENABLE_QEXT, so `prev == 0`); `quant_energy_finalise` loses the `oldEBands != NULL` check
-//! (always non-NULL outside ENABLE_QEXT).
+//! (always non-NULL outside ENABLE_QEXT). `amp2Log2` is folded into `bands::compute_band_energies`.
 
 use super::entcode::{ec_enc, ec_get_buffer, ec_range_bytes, ec_tell, ec_tell_frac};
 use super::entenc::{ec_enc_bit_logp, ec_enc_bits, ec_enc_icdf};
 use super::laplace::ec_laplace_encode;
-use super::mathops::{floor64, log2};
+use super::mathops::floor64;
 use super::modes;
 use super::rate::MAX_FINE_BITS;
 use crate::celt::mathops::{fmax, fmin, imax, imin};
@@ -362,18 +362,6 @@ pub fn quant_energy_finalise(
                 bits_left -= 1;
             }
             i += 1;
-        }
-    }
-}
-
-/// (`effEnd == end` here, so the `-14` fill of the bands above effEnd never happens)
-pub fn amp2Log2(end: i32, bandE: &[f32], bandLogE: &mut [f32], C: i32) {
-    for c in 0..C {
-        let base = (c * modes::nbEBands) as usize;
-        let out = &mut bandLogE[base..base + end as usize];
-        let e = &bandE[base..base + end as usize];
-        for ((o, &b), &mean) in out.iter_mut().zip(e).zip(&eMeans[..end as usize]) {
-            *o = log2(b) - mean;
         }
     }
 }

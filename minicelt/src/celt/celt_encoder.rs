@@ -18,9 +18,7 @@ use super::mathops::{
 use super::mdct::clt_mdct_forward;
 use super::modes;
 use super::pitch::{celt_inner_prod, pitch_downsample_factor2, pitch_search, remove_doubling};
-use super::quant_bands::{
-    amp2Log2, eMeans, quant_coarse_energy, quant_energy_finalise, quant_fine_energy,
-};
+use super::quant_bands::{eMeans, quant_coarse_energy, quant_energy_finalise, quant_fine_energy};
 use super::rate::clt_compute_allocation;
 use crate::celt::mathops::{fmax, fmin, imax, imin};
 use crate::opus::defines::OPUS_INTERNAL_ERROR;
@@ -1734,8 +1732,7 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     let secondMdct = shortBlocks != 0 && st.complexity >= 8;
     if secondMdct {
         compute_mdcts(0, in_, freq, C, CC);
-        compute_band_energies(freq, bandE, end, C);
-        amp2Log2(end, bandE, bandLogE2, C);
+        compute_band_energies(freq, bandE, bandLogE2, end, C);
         for row in bandLogE2.as_chunks_mut::<{ modes::nbEBands as usize }>().0 {
             for v in &mut row[..endu] {
                 *v += 0.5f32 * LM as f32;
@@ -1750,10 +1747,8 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
     if CC == 2 && C == 1 {
         tf_chan = 0;
     }
-    compute_band_energies(freq, bandE, end, C);
-
     /* (LFE band limiting removed) */
-    amp2Log2(end, bandE, bandLogE, C);
+    compute_band_energies(freq, bandE, bandLogE, end, C);
 
     /* (surround_dynalloc / surround masking removed: no energy mask) */
     /* Temporal VBR (but not for LFE) */
@@ -1792,8 +1787,7 @@ pub fn celt_encode_with_ec(st: &mut CELTEncoder, buf: &mut [f32], enc: &mut ec_e
             isTransient = 1;
             shortBlocks = M;
             compute_mdcts(shortBlocks, in_, freq, C, CC);
-            compute_band_energies(freq, bandE, end, C);
-            amp2Log2(end, bandE, bandLogE, C);
+            compute_band_energies(freq, bandE, bandLogE, end, C);
             /* Compensate for the scaling of short vs long mdcts */
             for row in bandLogE2.as_chunks_mut::<{ modes::nbEBands as usize }>().0 {
                 for v in &mut row[..endu] {
