@@ -74,6 +74,7 @@ pub fn ec_tell(this: &ec_ctx) -> i32 {
 }
 
 /// Returns the number of bits used so far, scaled by 2**BITRES.
+#[inline(always)]
 pub fn ec_tell_frac(this: &ec_ctx) -> u32 {
     /* This is a faster version of ec_tell_frac() that takes advantage
     of the low (1/8 bit) resolution to use just a linear function
