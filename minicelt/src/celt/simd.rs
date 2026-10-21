@@ -75,11 +75,18 @@ pub fn min4(a: v128, b: v128) -> v128 {
     f32x4_pmin(a, b)
 }
 
-/// Unaligned 4-float load. The caller guarantees `p[0..4]` is readable.
+/// Unaligned 16-byte load (four `f32` or `i32`). The caller guarantees `p[0..4]` is readable.
 // UNSAFE-MAND: `v128_load` is an unsafe intrinsic (a safe load would need a bounds-checked copy or `f32x4(..)`).
 #[inline(always)]
-pub unsafe fn ld(p: *const f32) -> v128 {
+pub unsafe fn load4<T>(p: *const T) -> v128 {
     unsafe { v128_load(p as *const v128) }
+}
+
+/// Unaligned 16-byte store (four `f32` or `i32`). The caller guarantees `p[0..4]` is writable.
+// UNSAFE-MAND: `v128_store` is an unsafe intrinsic.
+#[inline(always)]
+pub unsafe fn store4<T>(p: *mut T, v: v128) {
+    unsafe { v128_store(p as *mut v128, v) }
 }
 
 /// Sums the lanes of a, b, c and d: returns {sum(a), sum(b), sum(c), sum(d)}.
@@ -107,5 +114,19 @@ pub fn hsum_f32(a: v128) -> f32 {
 pub fn hsum_i32(a: v128) -> i32 {
     let a = i32x4_add(a, i64x2_shuffle::<1, 0>(a, a));
     let a = i32x4_add(a, i32x4_shuffle::<1, 0, 3, 2>(a, a));
+    i32x4_extract_lane::<0>(a)
+}
+
+/// Maximum of the four lanes, in every lane of the result (see [`max4`] for the NaN / +-0 condition).
+#[inline(always)]
+pub fn hmax4(a: v128) -> v128 {
+    let a = max4(a, i64x2_shuffle::<1, 0>(a, a));
+    max4(a, i32x4_shuffle::<1, 0, 3, 2>(a, a))
+}
+
+#[inline(always)]
+pub fn hmin_i32(a: v128) -> i32 {
+    let a = i32x4_min(a, i64x2_shuffle::<1, 0>(a, a));
+    let a = i32x4_min(a, i32x4_shuffle::<1, 0, 3, 2>(a, a));
     i32x4_extract_lane::<0>(a)
 }

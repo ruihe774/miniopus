@@ -11,7 +11,9 @@ use super::cwrs::encode_pulses;
 use super::entcode::{celt_udiv, ec_enc};
 use super::mathops::{EPSILON, atan2p_norm, cos_norm, floor64, rcp, rsqrt, sqrt};
 use super::pitch::celt_inner_prod;
-use super::simd::{hsum_f32, hsum_i32, laneselect, madd, max4, trunc_i32};
+use super::simd::{
+    hmax4, hmin_i32, hsum_f32, hsum_i32, laneselect, load4, madd, max4, store4, trunc_i32,
+};
 use crate::stack;
 
 fn exp_rotation1(X: &mut [f32], len: i32, stride: i32, c: f32, s: f32) {
@@ -132,24 +134,24 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
         /* Copy the last partial vector of _X into a zero-padded X; the full
         vectors are read from _X directly below. */
         let j0 = n & !3;
-        v128_store(pX.add(j0) as *mut v128, f32x4_splat(0.0));
-        v128_store(pX.add(j0 + 4) as *mut v128, f32x4_splat(0.0));
+        store4(pX.add(j0), f32x4_splat(0.0));
+        store4(pX.add(j0 + 4), f32x4_splat(0.0));
         for i in j0..n {
             *pX.add(i) = *p_X.add(i);
         }
         let mut sums = f32x4_splat(0.0);
         let mut j = 0usize;
         while j < n {
-            let mut x4 = v128_load(if j + 4 <= n { p_X.add(j) } else { pX.add(j) } as *const v128);
+            let mut x4 = load4(if j + 4 <= n { p_X.add(j) } else { pX.add(j) });
             let s4 = f32x4_lt(x4, f32x4_splat(0.0));
             /* Get rid of the sign */
             x4 = f32x4_abs(x4);
             sums = f32x4_add(sums, x4);
             /* Clear y and iy in case we don't do the projection. */
-            v128_store(py.add(j) as *mut v128, f32x4_splat(0.0));
-            v128_store(piy.add(j) as *mut v128, i32x4_splat(0));
-            v128_store(pX.add(j) as *mut v128, x4);
-            v128_store(ps.add(j) as *mut v128, s4);
+            store4(py.add(j), f32x4_splat(0.0));
+            store4(piy.add(j), i32x4_splat(0));
+            store4(pX.add(j), x4);
+            store4(ps.add(j), s4);
             j += 4;
         }
 
@@ -183,18 +185,18 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
             let mut pulses_sum = i32x4_splat(0);
             let mut j = 0usize;
             while j < n {
-                let x4 = v128_load(pX.add(j) as *const v128);
+                let x4 = load4(pX.add(j));
                 /* x4 >= 0 here, so truncation is the same as the floor() in the C
                 code. x4*rcp4 is finite, not NaN and at most K+.8, so the
                 relaxed truncation is exact too. */
                 let iy4 = trunc_i32(f32x4_mul(x4, rcp4));
                 pulses_sum = i32x4_add(pulses_sum, iy4);
-                v128_store(piy.add(j) as *mut v128, iy4);
+                store4(piy.add(j), iy4);
                 let y4 = f32x4_convert_i32x4(iy4);
                 xy4 = madd(x4, y4, xy4);
                 yy4 = madd(y4, y4, yy4);
                 /* double the y[] vector so we don't have to do it in the search loop. */
-                v128_store(py.add(j) as *mut v128, f32x4_add(y4, y4));
+                store4(py.add(j), f32x4_add(y4, y4));
                 j += 4;
             }
             pulsesLeft -= hsum_i32(pulses_sum);
@@ -204,8 +206,8 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
         /* The padding lanes get X=0 and a huge y, so their score is either 0
         (never selected, as only scores strictly above 0 are) or far below
         the score of any real position. */
-        v128_store(py.add(n) as *mut v128, f32x4_splat(1e15));
-        v128_store(py.add(n + 4) as *mut v128, f32x4_splat(1e15));
+        store4(py.add(n), f32x4_splat(1e15));
+        store4(py.add(n + 4), f32x4_splat(1e15));
         debug_assert!(pulsesLeft >= 0);
 
         /* This should never happen, but just in case it does (e.g. on silence)
@@ -234,11 +236,11 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
             let mut j = 0usize;
             while j < n {
                 /* Temporary sums of the new pulse(s) */
-                let rxy0 = f32x4_add(v128_load(pX.add(j) as *const v128), xy4);
-                let rxy1 = f32x4_add(v128_load(pX.add(j + 4) as *const v128), xy4);
+                let rxy0 = f32x4_add(load4(pX.add(j)), xy4);
+                let rxy1 = f32x4_add(load4(pX.add(j + 4)), xy4);
                 /* We're multiplying y[j] by two so we don't have to do it here */
-                let ryy0 = f32x4_add(v128_load(py.add(j) as *const v128), yy4);
-                let ryy1 = f32x4_add(v128_load(py.add(j + 4) as *const v128), yy4);
+                let ryy0 = f32x4_add(load4(py.add(j)), yy4);
+                let ryy1 = f32x4_add(load4(py.add(j + 4)), yy4);
                 /* We maximise Rxy/sqrt(Ryy), i.e. Rxy^2/Ryy since Rxy >= 0.
                 WebAssembly has no reciprocal (square root) estimate, and one
                 division is cheaper than a square root plus a division. */
@@ -257,14 +259,11 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
             pos0 = laneselect(pos1, pos0, f32x4_gt(best1, best0));
             best0 = max4(best0, best1);
             /* Horizontal max */
-            let mut max = max4(best0, i64x2_shuffle::<1, 0>(best0, best0));
-            max = max4(max, i32x4_shuffle::<1, 0, 3, 2>(max, max));
+            let max = hmax4(best0);
             /* Among the lanes that reach the global max, pick the lowest index,
             like the C code does. */
             pos0 = laneselect(pos0, i32x4_splat(0x7fffffff), f32x4_eq(best0, max));
-            pos0 = i32x4_min(pos0, i64x2_shuffle::<1, 0>(pos0, pos0));
-            pos0 = i32x4_min(pos0, i32x4_shuffle::<1, 0, 3, 2>(pos0, pos0));
-            let best_id = i32x4_extract_lane::<0>(pos0) as usize;
+            let best_id = hmin_i32(pos0) as usize;
 
             /* Updating the sums of the new pulse(s) */
             xy = xy + *pX.add(best_id);
@@ -280,10 +279,10 @@ pub fn op_pvq_search(_X: &[f32], iy: &mut [i32], K: i32, N: i32) -> f32 {
         /* Put the original sign back */
         let mut j = 0usize;
         while j < n {
-            let mut y4 = v128_load(piy.add(j) as *const v128);
-            let s4 = v128_load(ps.add(j) as *const v128);
+            let mut y4 = load4(piy.add(j));
+            let s4 = load4(ps.add(j));
             y4 = v128_xor(i32x4_add(y4, s4), s4);
-            v128_store(piy.add(j) as *mut v128, y4);
+            store4(piy.add(j), y4);
             j += 4;
         }
     }

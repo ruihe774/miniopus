@@ -1,11 +1,11 @@
 //! Port of celt/mathops.h and celt/mathops.c (float build, without FLOAT_APPROX).
 
-use super::simd::{max4, min4, trunc_i32};
+use super::simd::{hmax4, load4, max4, min4, trunc_i32};
 use core::arch::wasm32::{
     f32x4_add, f32x4_demote_f64x2_zero, f32x4_extract_lane, f32x4_neg, f32x4_splat, f64x2_add,
     f64x2_convert_low_i32x4, f64x2_div, f64x2_extract_lane, f64x2_floor, f64x2_mul,
-    f64x2_promote_low_f32x4, f64x2_splat, f64x2_sqrt, f64x2_sub, i32x4_shuffle, i64x2_add,
-    i64x2_extend_low_i32x4, i64x2_shl, i64x2_shuffle, i64x2_splat, v128, v128_load,
+    f64x2_promote_low_f32x4, f64x2_splat, f64x2_sqrt, f64x2_sub, i64x2_add, i64x2_extend_low_i32x4,
+    i64x2_shl, i64x2_splat, v128,
 };
 
 pub const CELT_SIG_SCALE: f32 = 32768.0;
@@ -62,22 +62,15 @@ pub fn maxabs(x: &[f32]) -> f32 {
     let mut min0 = f32x4_splat(0.0);
     let mut min1 = f32x4_splat(0.0);
     for c in chunks {
-        // UNSAFE-MAND: `v128_load` is an unsafe intrinsic; `c` is 8 floats.
-        let (v0, v1) = unsafe {
-            (
-                v128_load(c.as_ptr() as *const v128),
-                v128_load(c[4..].as_ptr() as *const v128),
-            )
-        };
+        // UNSAFE-MAND: `load4` is an unsafe load; `c` is 8 floats.
+        let (v0, v1) = unsafe { (load4(c.as_ptr()), load4(c[4..].as_ptr())) };
         max0 = max4(v0, max0);
         max1 = max4(v1, max1);
         min0 = min4(v0, min0);
         min1 = min4(v1, min1);
     }
     let m = max4(max4(max0, max1), f32x4_neg(min4(min0, min1)));
-    let m = max4(m, i64x2_shuffle::<1, 0>(m, m));
-    let m = max4(m, i32x4_shuffle::<1, 0, 3, 2>(m, m));
-    let mut maxval = f32x4_extract_lane::<0>(m);
+    let mut maxval = f32x4_extract_lane::<0>(hmax4(m));
     for &v in tail {
         maxval = fmax(maxval, v);
         maxval = fmax(maxval, -v);

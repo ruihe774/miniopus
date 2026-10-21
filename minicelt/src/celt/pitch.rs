@@ -6,7 +6,7 @@ use core::arch::wasm32::*;
 
 use super::celt_lpc::{_celt_autocorr, _celt_lpc};
 use super::mathops::sqrt;
-use super::simd::{hadd4, hsum_f32, ld, madd};
+use super::simd::{hadd4, hsum_f32, load4, madd, store4};
 use crate::stack;
 
 pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
@@ -20,12 +20,12 @@ pub fn celt_inner_prod(x: &[f32], y: &[f32], N: i32) -> f32 {
     // UNSAFE-PERF: unchecked pointer loads instead of bounds-checked slices.
     unsafe {
         while i + 7 < n {
-            sum0 = madd(ld(px.add(i)), ld(py.add(i)), sum0);
-            sum1 = madd(ld(px.add(i + 4)), ld(py.add(i + 4)), sum1);
+            sum0 = madd(load4(px.add(i)), load4(py.add(i)), sum0);
+            sum1 = madd(load4(px.add(i + 4)), load4(py.add(i + 4)), sum1);
             i += 8;
         }
         if i + 3 < n {
-            sum0 = madd(ld(px.add(i)), ld(py.add(i)), sum0);
+            sum0 = madd(load4(px.add(i)), load4(py.add(i)), sum0);
             i += 4;
         }
     }
@@ -49,16 +49,28 @@ unsafe fn xcorr4_float(x: *const f32, y: *const f32, len: usize) -> v128 {
         broadcast and multiplied with y[j..j+3]. */
         let mut j = 0usize;
         while j + 3 < len {
-            let xj = ld(x.add(j));
-            sum0 = madd(i32x4_shuffle::<0, 0, 0, 0>(xj, xj), ld(y.add(j)), sum0);
-            sum1 = madd(i32x4_shuffle::<1, 1, 1, 1>(xj, xj), ld(y.add(j + 1)), sum1);
-            sum2 = madd(i32x4_shuffle::<2, 2, 2, 2>(xj, xj), ld(y.add(j + 2)), sum2);
-            sum3 = madd(i32x4_shuffle::<3, 3, 3, 3>(xj, xj), ld(y.add(j + 3)), sum3);
+            let xj = load4(x.add(j));
+            sum0 = madd(i32x4_shuffle::<0, 0, 0, 0>(xj, xj), load4(y.add(j)), sum0);
+            sum1 = madd(
+                i32x4_shuffle::<1, 1, 1, 1>(xj, xj),
+                load4(y.add(j + 1)),
+                sum1,
+            );
+            sum2 = madd(
+                i32x4_shuffle::<2, 2, 2, 2>(xj, xj),
+                load4(y.add(j + 2)),
+                sum2,
+            );
+            sum3 = madd(
+                i32x4_shuffle::<3, 3, 3, 3>(xj, xj),
+                load4(y.add(j + 3)),
+                sum3,
+            );
             j += 4;
         }
         let mut sum = f32x4_add(f32x4_add(sum0, sum1), f32x4_add(sum2, sum3));
         while j < len {
-            sum = madd(f32x4_splat(*x.add(j)), ld(y.add(j)), sum);
+            sum = madd(f32x4_splat(*x.add(j)), load4(y.add(j)), sum);
             j += 1;
         }
         sum
@@ -92,31 +104,31 @@ pub fn celt_pitch_xcorr(_x: &[f32], _y: &[f32], xcorr: &mut [f32], len: i32, max
             let mut sum7 = sum0;
             let mut j = 0usize;
             while j + 3 < len {
-                let xj = ld(px.add(j));
-                sum0 = madd(xj, ld(y.add(j)), sum0);
-                sum1 = madd(xj, ld(y.add(j + 1)), sum1);
-                sum2 = madd(xj, ld(y.add(j + 2)), sum2);
-                sum3 = madd(xj, ld(y.add(j + 3)), sum3);
-                sum4 = madd(xj, ld(y.add(j + 4)), sum4);
-                sum5 = madd(xj, ld(y.add(j + 5)), sum5);
-                sum6 = madd(xj, ld(y.add(j + 6)), sum6);
-                sum7 = madd(xj, ld(y.add(j + 7)), sum7);
+                let xj = load4(px.add(j));
+                sum0 = madd(xj, load4(y.add(j)), sum0);
+                sum1 = madd(xj, load4(y.add(j + 1)), sum1);
+                sum2 = madd(xj, load4(y.add(j + 2)), sum2);
+                sum3 = madd(xj, load4(y.add(j + 3)), sum3);
+                sum4 = madd(xj, load4(y.add(j + 4)), sum4);
+                sum5 = madd(xj, load4(y.add(j + 5)), sum5);
+                sum6 = madd(xj, load4(y.add(j + 6)), sum6);
+                sum7 = madd(xj, load4(y.add(j + 7)), sum7);
                 j += 4;
             }
             let mut lo = hadd4(sum0, sum1, sum2, sum3);
             let mut hi = hadd4(sum4, sum5, sum6, sum7);
             while j < len {
                 let xj = f32x4_splat(*px.add(j));
-                lo = madd(xj, ld(y.add(j)), lo);
-                hi = madd(xj, ld(y.add(j + 4)), hi);
+                lo = madd(xj, load4(y.add(j)), lo);
+                hi = madd(xj, load4(y.add(j + 4)), hi);
                 j += 1;
             }
-            v128_store(po.add(i) as *mut v128, lo);
-            v128_store(po.add(i + 4) as *mut v128, hi);
+            store4(po.add(i), lo);
+            store4(po.add(i + 4), hi);
             i += 8;
         }
         if i + 3 < max_pitch {
-            v128_store(po.add(i) as *mut v128, xcorr4_float(px, py.add(i), len));
+            store4(po.add(i), xcorr4_float(px, py.add(i), len));
             i += 4;
         }
         /* In case max_pitch isn't a multiple of 4, do non-unrolled version. */
@@ -141,18 +153,18 @@ pub fn dual_inner_prod(x: &[f32], y01: &[f32], y02: &[f32], N: i32, xy1: &mut f3
     // UNSAFE-PERF: unchecked pointer loads instead of bounds-checked slices.
     unsafe {
         while i + 7 < n {
-            let xi = ld(px.add(i));
-            let xi4 = ld(px.add(i + 4));
-            sum1a = madd(xi, ld(p1.add(i)), sum1a);
-            sum2a = madd(xi, ld(p2.add(i)), sum2a);
-            sum1b = madd(xi4, ld(p1.add(i + 4)), sum1b);
-            sum2b = madd(xi4, ld(p2.add(i + 4)), sum2b);
+            let xi = load4(px.add(i));
+            let xi4 = load4(px.add(i + 4));
+            sum1a = madd(xi, load4(p1.add(i)), sum1a);
+            sum2a = madd(xi, load4(p2.add(i)), sum2a);
+            sum1b = madd(xi4, load4(p1.add(i + 4)), sum1b);
+            sum2b = madd(xi4, load4(p2.add(i + 4)), sum2b);
             i += 8;
         }
         if i + 3 < n {
-            let xi = ld(px.add(i));
-            sum1a = madd(xi, ld(p1.add(i)), sum1a);
-            sum2a = madd(xi, ld(p2.add(i)), sum2a);
+            let xi = load4(px.add(i));
+            sum1a = madd(xi, load4(p1.add(i)), sum1a);
+            sum2a = madd(xi, load4(p2.add(i)), sum2a);
             i += 4;
         }
     }
@@ -194,11 +206,11 @@ pub unsafe fn comb_filter_const(
         let g10v = f32x4_splat(g10);
         let g11v = f32x4_splat(g11);
         let g12v = f32x4_splat(g12);
-        let mut x0v = ld(x.offset(-T - 2));
+        let mut x0v = load4(x.offset(-T - 2));
         let n = N as isize;
         while i < n - 3 {
-            let mut yi = ld(x.offset(i));
-            let x4v = ld(x.offset(i - T + 2));
+            let mut yi = load4(x.offset(i));
+            let x4v = load4(x.offset(i - T + 2));
             let x1v = i32x4_shuffle::<1, 2, 3, 4>(x0v, x4v);
             let x2v = i32x4_shuffle::<2, 3, 4, 5>(x0v, x4v);
             let x3v = i32x4_shuffle::<3, 4, 5, 6>(x0v, x4v);
@@ -206,7 +218,7 @@ pub unsafe fn comb_filter_const(
             yi = madd(g11v, f32x4_add(x3v, x1v), yi);
             yi = madd(g12v, f32x4_add(x4v, x0v), yi);
             x0v = x4v;
-            v128_store(y.offset(i) as *mut v128, yi);
+            store4(y.offset(i), yi);
             i += 4;
         }
         while i < n {
