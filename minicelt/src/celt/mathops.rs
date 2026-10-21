@@ -1,6 +1,9 @@
 //! Port of celt/mathops.h and celt/mathops.c (float build, without FLOAT_APPROX).
 
-use core::arch::wasm32::{f64x2_extract_lane, f64x2_floor, f64x2_splat, f64x2_sqrt};
+use core::arch::wasm32::{
+    f32x4_extract_lane, f32x4_neg, f32x4_pmax, f32x4_pmin, f32x4_splat, f64x2_extract_lane,
+    f64x2_floor, f64x2_splat, f64x2_sqrt, i32x4_shuffle, i64x2_shuffle, v128, v128_load,
+};
 
 pub const CELT_SIG_SCALE: f32 = 32768.0;
 
@@ -42,15 +45,38 @@ pub fn floor64(x: f64) -> f64 {
 /// PI from celt/mathops.h (a double constant).
 pub const PI: f64 = 3.1415926535897931;
 
-/// C celt_maxabs16, celt_maxabs_res.
+/// C celt_maxabs16, celt_maxabs_res. Vectorized: `f32x4_pmax(v, acc)` is `acc > v ? acc : v`, i.e.
+/// `fmax(acc, v)` (and `f32x4_pmin(v, acc)` is `fmin(acc, v)`), and the extrema do not depend on the
+/// order, so the result is that of the scalar loop for any input without NaN (up to the sign of a
+/// zero result, which is only compared).
 pub fn maxabs(x: &[f32]) -> f32 {
-    let mut maxval: f32 = 0.0;
-    let mut minval: f32 = 0.0;
-    for &v in x {
-        maxval = fmax(maxval, v);
-        minval = fmin(minval, v);
+    let (chunks, tail) = x.as_chunks::<8>();
+    let mut max0 = f32x4_splat(0.0);
+    let mut max1 = f32x4_splat(0.0);
+    let mut min0 = f32x4_splat(0.0);
+    let mut min1 = f32x4_splat(0.0);
+    for c in chunks {
+        // UNSAFE-MAND: `v128_load` is an unsafe intrinsic; `c` is 8 floats.
+        let (v0, v1) = unsafe {
+            (
+                v128_load(c.as_ptr() as *const v128),
+                v128_load(c[4..].as_ptr() as *const v128),
+            )
+        };
+        max0 = f32x4_pmax(v0, max0);
+        max1 = f32x4_pmax(v1, max1);
+        min0 = f32x4_pmin(v0, min0);
+        min1 = f32x4_pmin(v1, min1);
     }
-    fmax(maxval, -minval)
+    let m = f32x4_pmax(f32x4_pmax(max0, max1), f32x4_neg(f32x4_pmin(min0, min1)));
+    let m = f32x4_pmax(m, i64x2_shuffle::<1, 0>(m, m));
+    let m = f32x4_pmax(m, i32x4_shuffle::<1, 0, 3, 2>(m, m));
+    let mut maxval = f32x4_extract_lane::<0>(m);
+    for &v in tail {
+        maxval = fmax(maxval, v);
+        maxval = fmax(maxval, -v);
+    }
+    maxval
 }
 
 /// Calculates the arctangent of x using a Remez approximation of order 15,

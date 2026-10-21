@@ -13,3 +13,4 @@ minicelt = { path = ".." }
 
 [features]
 stack-peak = ["minicelt/stack-peak"]
+bench-maxabs = ["minicelt/bench-maxabs"]

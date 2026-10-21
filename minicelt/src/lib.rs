@@ -13,6 +13,8 @@ compile_error!("minicelt only supports wasm32 (build with -Ctarget-feature=+simd
 compile_error!("minicelt requires -Ctarget-feature=+simd128");
 
 mod celt;
+#[cfg(feature = "bench-maxabs")]
+pub use celt::mathops::maxabs;
 pub mod global;
 pub mod opus;
 pub mod stack;

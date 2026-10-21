@@ -173,3 +173,17 @@ pub extern "C" fn minicelt_in_dtx() -> i32 {
 pub extern "C" fn minicelt_stack_peak() -> u32 {
     minicelt::stack::peak() as u32
 }
+
+/// Calls `maxabs` `iters` times on `len` samples at `off` of the input buffer and returns the largest
+/// result (measurement builds only: `--features bench-maxabs`, see minicelt/test/bench_maxabs.ts).
+#[cfg(feature = "bench-maxabs")]
+#[unsafe(no_mangle)] // UNSAFE-MAND: `no_mangle` is an unsafe attribute
+pub extern "C" fn minicelt_bench_maxabs(off: i32, len: i32, iters: i32) -> f32 {
+    let x = &input()[off as usize..][..len as usize];
+    let mut m: f32 = 0.0;
+    for _ in 0..iters {
+        let v = minicelt::maxabs(core::hint::black_box(x));
+        m = if v > m { v } else { m };
+    }
+    m
+}

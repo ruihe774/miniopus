@@ -102,6 +102,9 @@ bit-exact comparison below. What was removed or specialized:
   libm's `acos` with the hardware `sqrt`, `mathops::log2` libm's `log` for positive normal `f32` (reduced
   on the `f32` bits) and `mathops::exp2` libm's `exp` for `0 <= x <= 4` (no special cases, no `scalbn`).
   All four are bit for bit equal to `libm`'s, checked exhaustively over the inputs they can see.
+- `mathops::maxabs` is vectorized (`f32x4_pmax`/`f32x4_pmin`, which are the C ternaries `fmax`/`fmin` with the
+  operands swapped; min and max do not depend on the order): packets identical to the scalar loop, 2-5 % less
+  encode time in `bench.ts` (it scans every frame three times). `minicelt/test/bench_maxabs.ts` microbenchmarks it.
 - Bounds checks: where the compiler can be given a proof (constant indices into fixed arrays, masks,
   `match` on a bounded value, iterators, `chunks_exact`, a re-slice hoisted out of the loop) the code uses
   plain indexing, which is checked in every profile and adds no check in a per-sample loop. Where it

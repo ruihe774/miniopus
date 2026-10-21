@@ -10,3 +10,5 @@ test = false
 [features]
 # Track the high-water mark of the pseudostack (see src/stack.rs); measurement only.
 stack-peak = []
+# Export `maxabs` for minicelt/test/bench_maxabs.ts; measurement only.
+bench-maxabs = []

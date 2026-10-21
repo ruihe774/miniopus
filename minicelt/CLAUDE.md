@@ -22,6 +22,7 @@ Rust port of the libopus CELT-only float encoder for wasm32. Read `PORTING.md` b
   `third_party/opus` (scalar C as the oracle, by tolerance). `scripts/gen_tables.py` generates
   `src/celt/static_modes_float.rs` (trimmed to the scope).
 - `test/bench.ts` (Deno): A/B encode-time benchmark of two builds (PORTING.md "Trimming").
+  `test/bench_maxabs.ts`: A/B microbenchmark of `mathops::maxabs` (builds with `--features bench-maxabs`).
 - `test/coverage.ts` + `scripts/coverage.sh`: function / branch-arm coverage printed to the log (CI job `coverage`).
 
 ## Commands (from the workspace root)
